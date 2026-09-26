@@ -173,6 +173,8 @@ def build_mm_state(
             "abs_imbalance": float(flow.get("abs_imbalance", 0.0)),
             "ewma_toxicity": float(flow.get("ewma_toxicity", 0.0)),
             "toxicity_composite": float(flow.get("toxicity_composite", 0.0)),
+            "hawkes_intensity": float(flow.get("hawkes_intensity", 0.0)),
+            "hawkes_excitation": float(flow.get("hawkes_excitation", 0.0)),
             "note": "research-grade toxicity features (not production VPIN)",
         },
         "policy_note": (

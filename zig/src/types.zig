@@ -9,10 +9,12 @@ pub const Side = enum(u8) {
 /// - `as_finite_horizon`: classic Avellaneda–Stoikov reservation/spread with T−t.
 /// - `gueant_asymptotic`: Guéant–Lehalle–Fernandez-Tapia stationary approx (arXiv 1105.3115).
 /// - `gueant_ode`: finite-horizon / spectral ODE on the same intensity (arXiv 1105.3115 §3).
+/// - `option_vega`: Baldacci–Bergault–Guéant constant-vega HJB (arXiv 1907.12433).
 pub const QuoteMode = enum(u8) {
     as_finite_horizon = 0,
     gueant_asymptotic = 1,
     gueant_ode = 2,
+    option_vega = 3,
 };
 
 pub const Greeks = struct {
@@ -113,6 +115,25 @@ pub const QuoterConfig = struct {
     max_half_spread: f64 = 5.0,
     quote_size: i32 = 1,
     mode: QuoteMode = .as_finite_horizon,
+    /// Constant per-contract vega ∂V/∂σ for `option_vega` (overridden by greeks.vega).
+    contract_vega: f64 = 10.0,
+    /// Vol-of-vol ξ in the quadratic penalty γ ξ² (1−ρ²) / 8.
+    xi: f64 = 1.0,
+    /// Hard |portfolio vega| cap V̄.
+    vega_limit: f64 = 40.0,
+    /// P-vs-Q variance drift, (a_P − a_Q) / (2 √ν).
+    vol_edge: f64 = 0.0,
+    /// Spot–vol correlation used to scale the vega penalty by (1−ρ²).
+    option_rho: f64 = 0.0,
+    /// Theo IV − market IV (decimal). Reservation shifts by contract_vega * iv_alpha.
+    iv_alpha: f64 = 0.0,
+    /// 0 = exponential Λ(δ)=A e^{−kδ}, 1 = logistic Λ.
+    intensity_kind: u8 = 0,
+    logistic_lambda: f64 = 100.0,
+    logistic_alpha: f64 = 0.7,
+    logistic_beta: f64 = 150.0,
+    option_grid_n: u32 = 31,
+    option_grid_steps: u32 = 60,
 };
 
 pub const RiskConfig = struct {

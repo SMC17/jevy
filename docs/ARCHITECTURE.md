@@ -11,7 +11,7 @@
 
 | Concern | Implementation |
 | --- | --- |
-| BS price + greeks (incl. vanna/volga), A–S / **Guéant asymptotic and ODE**, multi-strike strip, **multi-expiry term risk**, hard risk, Poisson **and queue** fills, SABR-lite **and SVI/SSVI**, markout, mark PnL, parity/boxes/combos, banded hedge, scenario matrix, toxicity, sequenced event log + replay | **Zig** (`zig/src/`), shipped as `libjev_omm.so` (C ABI) |
+| BS price + greeks (incl. vanna/volga), A–S / **Guéant asymptotic and ODE** / **option-vega HJB**, multi-strike strip, **multi-expiry term risk**, hard risk, Poisson **and queue** fills, SABR-lite **and SVI/SSVI**, markout, mark PnL, parity/boxes/combos, banded hedge **and spot–vol tilt**, scenario matrix, toxicity **and Hawkes**, variance-swap weights, training-case kernels, sequenced event log + replay | **Zig** (`zig/src/`), shipped as `libjev_omm.so` (C ABI) |
 | TypeSafe / Jev decisions, policy, config, surface glue (prefer Zig SABR), paper demo orchestration, JSONL notebooks | **Python** (`jev_omm/`) — research glue only |
 | Python default pricing import | `jev_omm.pricing` → ctypes Zig if `.so` present, else pure Python |
 
@@ -80,6 +80,7 @@ MarketData ──► Surface / FairValue ──► Quoter (AS + greek penalties)
   - `as_finite_horizon`: classic A–S reservation/spread with rolling horizon T−t
   - `gueant_asymptotic`: stationary closed form (arXiv 1105.3115) with mid-touch intensity A
   - `gueant_ode`: finite-horizon ODE / principal eigenmode of the linear system, inventory cap Q
+  - `option_vega`: Baldacci–Bergault–Guéant constant-vega grid (arXiv 1907.12433). Reservation and premiums are a function of portfolio vega. Cash A–S math is not used in this mode.
   - reservation from inventory; half-spread from (A, k, γ, σ); (A, k) can be fit from a synthetic tape
 - **Multi-strike strip** (`multi_strike.zig`): 5 strikes around spot, shared portfolio-Δ tilt
 - **Multi-expiry book** (`term_book.zig`): bucket vega, term-structure slope, vanna, volga, per-expiry scenario tilt
@@ -108,7 +109,8 @@ See [SYSTEM_ONE_JEV.md](./SYSTEM_ONE_JEV.md).
 - Inventory state is delta-normalized where AS uses `q`.
 
 ### 3.6 Hedge
-- Converts residual delta (and later gamma buckets) into underlying/hedge-instrument orders **in sim**.
+- Converts residual delta into underlying hedge tickets **in sim**.
+- Optional spot–vol target `qS* = −Δ − ρ ξ V^π / (2 √ν S)` (Baldacci appendix). Banded delta hedge is unchanged.
 - Urgency: continuous hedge vs Decision `hedge_now` noul gate.
 - Slippage model explicit and attributed.
 

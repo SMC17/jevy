@@ -39,7 +39,9 @@ ATM limit and edge cases documented in `zig/src/surface.zig` and `jev_omm/surfac
 | `gueant_ode.py` / `gueant_ode.zig` | Finite-horizon ODE + principal eigenmode; Poisson MLE for \((A,k)\) on a synthetic tape |
 | `multi_strike.py` / `multi_strike.zig` | Desk strip (≈5 strikes), shared portfolio-Δ tilt |
 
-Toggle via `QuoterConfig.mode` ∈ `{as_finite_horizon, gueant_asymptotic, gueant_ode}`. `spread_mult` / `size_mult` from decisions layer.
+| `option_mm.py` / `option_mm.zig` | Constant-vega HJB (Baldacci–Bergault–Guéant). Exponential or logistic intensity. Stoikov–Sağlam Theorem 4 premiums. `iv_alpha` reservation shift |
+
+Toggle via `QuoterConfig.mode` ∈ `{as_finite_horizon, gueant_asymptotic, gueant_ode, option_vega}`. `spread_mult` / `size_mult` from the decisions layer. The model does not emit orders.
 
 ## `decisions/` (TypeSafe System One / Jev)
 
@@ -71,15 +73,21 @@ Hard inventory / delta / vega / gamma / loss limits → `quoting_allowed=False`.
 
 Banded delta hedge + underlier slippage + Natenberg greek PnL buckets (`hedge.zig` / `hedge/delta.py`). Flatten-to-zero when |Δ| > band (optional to-edge). WW-style band helper documented.
 
-**Upgrade:** futures/ETF execution sim with queue; borrow; discrete hedge calendar.
+Spot–vol tilt: `spot_vol_hedge_qty` / `spotVolHedgeQty` (Baldacci appendix).
+
+**Upgrade:** futures/ETF execution sim with queue; borrow; discrete hedge calendar. Charm/color bands.
 
 ## `flow/`
 
 Research-grade rolling imbalance / simplified VPIN-style buckets → Decision `flow.*` features (`toxicity.zig` / `flow/toxicity.py`). **Not production VPIN.**
 
+Hawkes excitation (`hawkes.zig` / `flow/hawkes.py`) adds `flow.hawkes_intensity` and `flow.hawkes_excitation`. The fallback toxicity Score reads the excitation. `fill_intensity` can scale a synthetic Poisson rate.
+
 ## `execution/`
 
 Poisson fills (`fills.py`) with intensity decaying in distance-from-mid, plus a synthetic queue model (`lob.py` / `lob.zig`): depth, queue position, cancel latency, partial fills, adverse-selection markout, sequenced LobAdd / LobExecute / LobCancel.
+
+`queue_value` / `depth_ahead` score a resting order and the size in front of it on a small multi-level book.
 
 **Upgrade:** historical LOB replay (still no live market-data session).
 
@@ -108,6 +116,14 @@ Rich-friendly run summary + attribution table in demos.
 Greek P&L explain landed in `hedge.greekPnlStep` / event-log `GreekPnl` + `HedgeFill`.
 
 **Upgrade:** structured logging, metrics export.
+
+## `training/`
+
+Citadel-style paper cases. See [TRAINING_CASES.md](./TRAINING_CASES.md). Zig twin: `zig/src/training.zig`, `zig build training`.
+
+## `surface/dupire.py`, `surface/rough_vol.py`, `pricing/varswap.py`
+
+Research surface extensions. Dupire local variance (Python). Rough Bergomi stress paths (Python). Variance- and vol-swap weights (Python + `varswap.zig`). See [LITERATURE_CANON.md](./LITERATURE_CANON.md).
 
 ## `config.py`
 
