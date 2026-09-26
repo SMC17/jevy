@@ -1,0 +1,11 @@
+.{
+    .name = .jev_omm,
+    .version = "0.1.0",
+    .fingerprint = 0xafb4dcb5df4f7149,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
