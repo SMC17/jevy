@@ -1,0 +1,33 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Zig
+zig-out/
+.zig-cache/
+zig/zig-out/
+zig/.zig-cache/
+
+# Native artifacts (rebuild: see README)
+*.so
+*.dylib
+*.dll
+*.a
+
+# Sim outputs
+*.jsonl
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
