@@ -204,3 +204,30 @@ def whalley_wilmott_band(
 
 def net_delta(option_delta: float, underlier_pos: float) -> float:
     return option_delta + underlier_pos
+
+
+def spot_vol_hedge_qty(
+    net_delta: float,
+    *,
+    rho: float,
+    xi: float,
+    portfolio_vega: float,
+    variance: float,
+    spot: float,
+) -> float:
+    """Baldacci appendix: qS* = −Δ − ρ ξ V^π / (2 √ν S).
+
+    ``variance`` is Heston ν. ``portfolio_vega`` is Σ q ∂V/∂σ.
+    Cite https://arxiv.org/abs/1907.12433. Paper hedge target, not an order.
+    """
+    if _native.ZIG_AVAILABLE and hasattr(_native, "spot_vol_hedge"):
+        try:
+            return float(
+                _native.spot_vol_hedge(net_delta, rho, xi, portfolio_vega, variance, spot)
+            )
+        except Exception:
+            pass
+    nu = max(variance, 1e-16)
+    s = max(abs(spot), 1e-16)
+    tilt = rho * xi * portfolio_vega / (2.0 * (nu**0.5) * s)
+    return -net_delta - tilt

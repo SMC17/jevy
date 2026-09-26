@@ -238,6 +238,37 @@ fn doTermAggregate(i: usize) f64 {
     return book.vega + book.vanna + book.volga + book.term_vega_slope;
 }
 
+const option_mm = root.option_mm;
+const hawkes = root.hawkes;
+const training = root.training;
+
+fn doOptionMmSolveQuote(i: usize) f64 {
+    var cfg = option_mm.researchToy();
+    cfg.grid_n = 21;
+    cfg.n_steps = 20;
+    const v = blackBox(@as(f64, @floatFromInt(@as(i32, @intCast(i % 9)) - 4)) * 4.0);
+    const q = option_mm.solveAndQuote(&cfg, 10.0, v, 5.0, 1.0, 1.0);
+    return q.delta_b + q.delta_a + q.reservation;
+}
+
+fn doHawkesIntensity(i: usize) f64 {
+    const p = hawkes.HawkesParams{ .mu = 1.2, .alpha = 0.5, .beta = 1.8 };
+    var ev: [8]f64 = undefined;
+    var k: usize = 0;
+    while (k < ev.len) : (k += 1) {
+        ev[k] = @as(f64, @floatFromInt(k)) * 0.05 + @as(f64, @floatFromInt(i % 3)) * 0.01;
+    }
+    const t = 0.5 + @as(f64, @floatFromInt(i % 5)) * 0.02;
+    return hawkes.intensity(p, t, &ev) + hawkes.excitation(p, t, &ev);
+}
+
+fn doTrainingLocation(i: usize) f64 {
+    _ = i;
+    const naive = training.runCase("location_arb", .naive, 0.0);
+    const desk = training.runCase("location_arb", .desk, naive.absolute_pnl);
+    return desk.risk_adjusted - naive.risk_adjusted;
+}
+
 fn doScenarioMatrix(i: usize) f64 {
     const g = types.Greeks{
         .delta = blackBox(@as(f64, @floatFromInt(i % 10)) - 5.0),
@@ -269,4 +300,7 @@ pub fn main() void {
     benchOne("surface/svi_iv_and_density_g", 1_000_000, &doSviIv);
     benchOne("gueant/ode_offsets_q8_200steps", 2_000, &doGueantOde);
     benchOne("term/aggregate_3_expiries", 200_000, &doTermAggregate);
+    benchOne("option_mm/solve_and_quote_grid21x20", 2_000, &doOptionMmSolveQuote);
+    benchOne("hawkes/intensity_8_events", 500_000, &doHawkesIntensity);
+    benchOne("training/location_arb_pair", 2_000, &doTrainingLocation);
 }

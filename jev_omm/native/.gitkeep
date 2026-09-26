@@ -1,3 +1,7 @@
-# Rebuild: cd zig && zig build -Doptimize=ReleaseFast
-# cp -f zig-out/lib/libjev_omm.so jev_omm/native/libjev_omm.so
-# The shared library is gitignored (*.so). Python falls back to pure Python if it is absent.
+# Rebuild libjev_omm.so (gitignored). Zig 0.16:
+#   export PATH="$HOME/zig-0.16:$PATH"
+#   # if /opt/zig is not writable: install the 0.16 tarball under $HOME/zig-0.16
+#   cd zig && zig build -Doptimize=ReleaseFast
+#   cp -f zig-out/lib/libjev_omm.so ../jev_omm/native/libjev_omm.so
+# Python falls back to pure Python when the library is absent.
+# C ABI version string: 0.5.0-zig-oom-citadel-lit

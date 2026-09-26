@@ -356,6 +356,36 @@ test "partial fill when traded volume is inside our size" {
     try std.testing.expect(partial);
 }
 
+/// Expected value of a resting order: fills × (spread capture − adverse cost).
+/// Deeper `ahead` lowers the absolute value (fewer fills).
+pub fn queueValue(
+    spread_capture: f64,
+    adverse_per_fill: f64,
+    ahead: f64,
+    our_size: f64,
+    trade_intensity: f64,
+    cancel_ahead: f64,
+    horizon: f64,
+    cancel_latency: ?f64,
+) f64 {
+    const fills = expectedFills(ahead, our_size, trade_intensity, cancel_ahead, horizon, cancel_latency);
+    return fills * (spread_capture - adverse_per_fill);
+}
+
+pub const BookLevel = struct {
+    price: f64 = 0.0,
+    depth: f64 = 0.0,
+};
+
+/// Contracts strictly ahead of `our_index` on one side of a small multi-level book.
+pub fn depthAhead(levels: []const BookLevel, our_index: usize) f64 {
+    var s: f64 = 0.0;
+    var i: usize = 0;
+    const n = @min(our_index, levels.len);
+    while (i < n) : (i += 1) s += @max(levels[i].depth, 0.0);
+    return s;
+}
+
 test "cancels ahead shorten time to first fill without counting as our fill" {
     const with_cancel = timeToFirstFill(20.0, 10.0, 30.0);
     const no_cancel = timeToFirstFill(20.0, 10.0, 0.0);
@@ -363,4 +393,22 @@ test "cancels ahead shorten time to first fill without counting as our fill" {
     // After the queue clears, only trades fill us: 10/s * (1 - 0.5) = 5.
     const fills = expectedFills(20.0, 100.0, 10.0, 30.0, 1.0, null);
     try std.testing.expect(@abs(fills - 5.0) < 1e-9);
+}
+
+test "deeper queue lowers absolute queue value" {
+    const shallow = queueValue(0.10, 0.02, 1.0, 5.0, 20.0, 0.0, 1.0, null);
+    const deep = queueValue(0.10, 0.02, 30.0, 5.0, 20.0, 0.0, 1.0, null);
+    try std.testing.expect(shallow > deep);
+    try std.testing.expect(shallow > 0.0);
+    const toxic = queueValue(0.02, 0.20, 1.0, 5.0, 20.0, 0.0, 1.0, null);
+    const toxic_deep = queueValue(0.02, 0.20, 30.0, 5.0, 20.0, 0.0, 1.0, null);
+    try std.testing.expect(toxic < 0.0);
+    try std.testing.expect(toxic_deep > toxic);
+    const levels = [_]BookLevel{
+        .{ .price = 1.00, .depth = 4.0 },
+        .{ .price = 0.99, .depth = 6.0 },
+        .{ .price = 0.98, .depth = 8.0 },
+    };
+    try std.testing.expectApproxEqAbs(depthAhead(&levels, 2), 10.0, 1e-12);
+    try std.testing.expectApproxEqAbs(depthAhead(&levels, 0), 0.0, 1e-12);
 }

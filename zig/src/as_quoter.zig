@@ -9,6 +9,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const gueant = @import("gueant.zig");
 const gueant_ode = @import("gueant_ode.zig");
+const option_mm = @import("option_mm.zig");
 const QuoterConfig = types.QuoterConfig;
 const Greeks = types.Greeks;
 const Quote = types.Quote;
@@ -25,6 +26,9 @@ pub fn reservationPrice(
     t_remaining: ?f64,
     greeks_opt: ?*const Greeks,
 ) f64 {
+    if (cfg.mode == .option_vega) {
+        return option_mm.quoteFromQuoter(mid, inventory, cfg, greeks_opt, 1.0, 1.0).reservation;
+    }
     if (cfg.mode == .gueant_ode) {
         return gueant_ode.reservationPrice(mid, inventory, cfg, greeks_opt);
     }
@@ -44,6 +48,9 @@ pub fn reservationPrice(
 }
 
 pub fn optimalHalfSpread(cfg: *const QuoterConfig, t_remaining: ?f64) f64 {
+    if (cfg.mode == .option_vega) {
+        return option_mm.quoteFromQuoter(0.0, 0, cfg, null, 1.0, 1.0).half_spread;
+    }
     if (cfg.mode == .gueant_ode) {
         return gueant_ode.optimalHalfSpread(cfg, 0);
     }
@@ -69,6 +76,9 @@ pub fn makeQuote(
     spread_mult: f64,
     size_mult: f64,
 ) Quote {
+    if (cfg.mode == .option_vega) {
+        return option_mm.quoteFromQuoter(mid_in, inventory, cfg, greeks_opt, spread_mult, size_mult);
+    }
     if (cfg.mode == .gueant_ode) {
         return gueant_ode.makeQuote(mid_in, inventory, cfg, greeks_opt, spread_mult, size_mult);
     }
