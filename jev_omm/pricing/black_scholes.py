@@ -7,6 +7,8 @@ All Greeks are returned in SI-ish units:
   - gamma: ∂²V/∂S²
   - vega:  ∂V/∂σ  (σ decimal; multiply by 0.01 for "per vol point")
   - theta: ∂V/∂t  with t in years (negative for long options usually)
+  - vanna: ∂²V/∂S∂σ = −e^{−qT} n(d1) d2 / σ   (same for calls and puts)
+  - volga: ∂²V/∂σ² = vega · d1 · d2 / σ       (same for calls and puts)
 """
 
 from __future__ import annotations
@@ -101,6 +103,8 @@ def greeks(
 
     gamma = dq * pdf_d1 / (spot * iv * math.sqrt(t))
     vega = spot * dq * pdf_d1 * math.sqrt(t)
+    vanna = -dq * pdf_d1 * d2 / iv
+    volga = vega * d1 * d2 / iv
 
     if is_call:
         delta = dq * norm.cdf(d1)
@@ -117,7 +121,7 @@ def greeks(
             - div_yield * spot * dq * norm.cdf(-d1)
         )
 
-    return Greeks(delta=delta, gamma=gamma, vega=vega, theta=theta)
+    return Greeks(delta=delta, gamma=gamma, vega=vega, theta=theta, vanna=vanna, volga=volga)
 
 
 def price_and_greeks(

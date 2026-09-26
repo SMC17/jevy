@@ -32,8 +32,16 @@ from jev_omm.config import QuoterConfig
 from jev_omm.models.types import Greeks, Quote
 
 
+def _mode(cfg: QuoterConfig) -> str:
+    return getattr(cfg, "mode", "as_finite_horizon")
+
+
 def _is_gueant(cfg: QuoterConfig) -> bool:
-    return getattr(cfg, "mode", "as_finite_horizon") == "gueant_asymptotic"
+    return _mode(cfg) == "gueant_asymptotic"
+
+
+def _is_gueant_ode(cfg: QuoterConfig) -> bool:
+    return _mode(cfg) == "gueant_ode"
 
 
 def reservation_price(
@@ -44,6 +52,10 @@ def reservation_price(
     greeks: Greeks | None = None,
 ) -> float:
     """Indifference / reservation price given inventory and optional Greek tilts."""
+    if _is_gueant_ode(cfg):
+        from jev_omm.quoter.gueant_ode import reservation_price as ode_r
+
+        return ode_r(mid, inventory, cfg, greeks)
     if _is_gueant(cfg):
         from jev_omm.quoter.gueant import reservation_price as g_r
 
@@ -63,6 +75,10 @@ def reservation_price(
 
 def optimal_half_spread(cfg: QuoterConfig, t_remaining: float | None = None) -> float:
     """A–S / Guéant optimal half-spread; clamped to [min_half_spread, max_half_spread]."""
+    if _is_gueant_ode(cfg):
+        from jev_omm.quoter.gueant_ode import optimal_half_spread as ode_h
+
+        return ode_h(cfg, inventory=0)
     if _is_gueant(cfg):
         from jev_omm.quoter.gueant import optimal_half_spread as g_h
 
@@ -92,6 +108,10 @@ def make_quote(
     spread_mult / size_mult come from DecisionClient (aggressiveness / widen).
     Classical A–S math is unchanged; decisions only scale the posted quote.
     """
+    if _is_gueant_ode(cfg):
+        from jev_omm.quoter.gueant_ode import make_quote as ode_q
+
+        return ode_q(mid, inventory, cfg, greeks, spread_mult=spread_mult, size_mult=size_mult)
     if _is_gueant(cfg):
         from jev_omm.quoter.gueant import make_quote as g_q
 

@@ -37,6 +37,7 @@ class QuoterConfig(BaseModel):
       - ``as_finite_horizon``: classic A–S reservation/spread with T−t
       - ``gueant_asymptotic``: Guéant–Lehalle–Fernandez-Tapia stationary
         closed form (arXiv 1105.3115); uses ``A`` mid-touch intensity.
+      - ``gueant_ode``: finite-horizon / spectral ODE on the same intensity.
     """
 
     gamma: float = Field(default=0.1, description="Inventory risk aversion")
@@ -44,6 +45,8 @@ class QuoterConfig(BaseModel):
     sigma: float = Field(default=0.5, description="Option mid vol (abs $/√yr)")
     T_horizon: float = Field(default=1.0 / 252.0, description="Terminal horizon (years)")
     A: float = Field(default=140.0, description="Guéant mid-touch arrival intensity A")
+    inventory_cap: int = Field(default=10, description="Guéant ODE inventory bound Q")
+    ode_steps: int = Field(default=800, description="RK4 steps for gueant_ode over T_horizon")
     # Extra inventory penalties for options Greeks (approx; see quoter comments)
     gamma_penalty: float = 0.0
     vega_penalty: float = 0.0
@@ -55,7 +58,7 @@ class QuoterConfig(BaseModel):
     quote_size: int = 1
     mode: str = Field(
         default="as_finite_horizon",
-        description="as_finite_horizon | gueant_asymptotic",
+        description="as_finite_horizon | gueant_asymptotic | gueant_ode",
     )
 
 

@@ -1,8 +1,9 @@
 """Exogenous fill model: Poisson arrivals against posted quotes.
 
-WHY: In research sims we do not model a full LOB. Market orders arrive as a
-Poisson process; intensity rises when our quote is closer to mid (more
-aggressive) and falls when we widen. Bid and ask are independent.
+WHY: The baseline research sim posts against an exogenous Poisson flow.
+Intensity rises when our quote is closer to mid and falls when we widen.
+Bid and ask are independent. Queue position, cancel latency, and adverse
+selection live in ``lob.py`` (still synthetic — no live market data).
 """
 
 from __future__ import annotations

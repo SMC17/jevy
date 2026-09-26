@@ -3,10 +3,12 @@
 //!
 //! When `cfg.mode == .gueant_asymptotic`, delegates to Guéant–Lehalle–
 //! Fernandez-Tapia stationary approximations (`gueant.zig`, arXiv 1105.3115).
+//! `gueant_ode` solves the finite-horizon / spectral system in `gueant_ode.zig`.
 
 const std = @import("std");
 const types = @import("types.zig");
 const gueant = @import("gueant.zig");
+const gueant_ode = @import("gueant_ode.zig");
 const QuoterConfig = types.QuoterConfig;
 const Greeks = types.Greeks;
 const Quote = types.Quote;
@@ -23,6 +25,9 @@ pub fn reservationPrice(
     t_remaining: ?f64,
     greeks_opt: ?*const Greeks,
 ) f64 {
+    if (cfg.mode == .gueant_ode) {
+        return gueant_ode.reservationPrice(mid, inventory, cfg, greeks_opt);
+    }
     if (cfg.mode == .gueant_asymptotic) {
         return gueant.reservationPrice(mid, inventory, cfg, greeks_opt);
     }
@@ -39,6 +44,9 @@ pub fn reservationPrice(
 }
 
 pub fn optimalHalfSpread(cfg: *const QuoterConfig, t_remaining: ?f64) f64 {
+    if (cfg.mode == .gueant_ode) {
+        return gueant_ode.optimalHalfSpread(cfg, 0);
+    }
     if (cfg.mode == .gueant_asymptotic) {
         return gueant.optimalHalfSpread(cfg);
     }
@@ -61,6 +69,9 @@ pub fn makeQuote(
     spread_mult: f64,
     size_mult: f64,
 ) Quote {
+    if (cfg.mode == .gueant_ode) {
+        return gueant_ode.makeQuote(mid_in, inventory, cfg, greeks_opt, spread_mult, size_mult);
+    }
     if (cfg.mode == .gueant_asymptotic) {
         return gueant.makeQuote(mid_in, inventory, cfg, greeks_opt, spread_mult, size_mult);
     }
@@ -150,6 +161,25 @@ test "half spread clamped" {
     };
     const h = optimalHalfSpread(&cfg, null);
     try std.testing.expect(@abs(h - 0.05) < 1e-12);
+}
+
+test "mode toggle routes to gueant ode" {
+    const cfg = QuoterConfig{
+        .gamma = 0.1,
+        .kappa = 1.5,
+        .sigma = 0.4,
+        .A = 120.0,
+        .t_horizon = 0.5,
+        .inventory_cap = 6,
+        .ode_steps = 400,
+        .mode = .gueant_ode,
+        .min_half_spread = 0.01,
+        .max_half_spread = 20.0,
+        .quote_size = 1,
+    };
+    const q = makeQuote(4.0, 3, &cfg, null, null, 1.0, 1.0);
+    try std.testing.expect(q.ask > q.bid);
+    try std.testing.expect(q.reservation < 4.0);
 }
 
 test "mode toggle routes to gueant" {

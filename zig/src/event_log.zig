@@ -25,6 +25,9 @@ pub const EventKind = enum {
     risk_breach,
     hedge_fill,
     greek_pnl,
+    lob_add,
+    lob_cancel,
+    lob_execute,
 
     pub fn jsonName(self: EventKind) []const u8 {
         return switch (self) {
@@ -37,6 +40,9 @@ pub const EventKind = enum {
             .risk_breach => "RiskBreach",
             .hedge_fill => "HedgeFill",
             .greek_pnl => "GreekPnl",
+            .lob_add => "LobAdd",
+            .lob_cancel => "LobCancel",
+            .lob_execute => "LobExecute",
         };
     }
 };
@@ -225,7 +231,38 @@ pub const Log = struct {
         try self.commitLine(line);
     }
 
-        pub fn writeJsonl(self: *const Log, path: []const u8) !void {
+    /// Sequenced LOB event (add / cancel / execute) from the synthetic queue model.
+    pub fn appendLob(
+        self: *Log,
+        ts: f64,
+        step: u64,
+        kind: EventKind,
+        side: []const u8,
+        price: f64,
+        size: f64,
+        ahead: f64,
+        partial: bool,
+        adverse: bool,
+    ) !void {
+        const seq = self.nextSeq();
+        const name = kind.jsonName();
+        var line_buf: [MAX_LINE]u8 = undefined;
+        const line = try std.fmt.bufPrint(&line_buf, "{{\"seq\":{d},\"ts\":{d:.10},\"type\":\"{s}\",\"step\":{d},\"side\":\"{s}\",\"price\":{d:.10},\"size\":{d:.6},\"ahead\":{d:.6},\"partial\":{s},\"adverse\":{s}}}", .{
+            seq,
+            ts,
+            name,
+            step,
+            side,
+            price,
+            size,
+            ahead,
+            if (partial) "true" else "false",
+            if (adverse) "true" else "false",
+        });
+        try self.commitLine(line);
+    }
+
+    pub fn writeJsonl(self: *const Log, path: []const u8) !void {
         const io = std.Io.Threaded.global_single_threaded.io();
         try std.Io.Dir.cwd().writeFile(io, .{
             .sub_path = path,
@@ -309,6 +346,9 @@ fn eventTypeOf(line: []const u8) ?EventKind {
     if (std.mem.eql(u8, name, "RiskBreach")) return .risk_breach;
     if (std.mem.eql(u8, name, "HedgeFill")) return .hedge_fill;
     if (std.mem.eql(u8, name, "GreekPnl")) return .greek_pnl;
+    if (std.mem.eql(u8, name, "LobAdd")) return .lob_add;
+    if (std.mem.eql(u8, name, "LobCancel")) return .lob_cancel;
+    if (std.mem.eql(u8, name, "LobExecute")) return .lob_execute;
     return null;
 }
 
@@ -381,7 +421,7 @@ pub fn replayJsonl(jsonl: []const u8) ReplayResult {
             .decision_snapshot => {
                 result.n_decisions += 1;
             },
-            .quote, .cancel, .hedge_fill, .greek_pnl => {},
+            .quote, .cancel, .hedge_fill, .greek_pnl, .lob_add, .lob_cancel, .lob_execute => {},
         }
     }
 
@@ -448,6 +488,22 @@ test "replay recomputes markout from fills" {
     // hash of bytes matches log.sha256Hex
     const h = log.sha256Hex();
     try std.testing.expectEqualStrings(&h, &r.log_sha256_hex);
+}
+
+test "lob events are sequenced add then execute then cancel" {
+    const a = std.testing.allocator;
+    var log = Log.init(a);
+    defer log.deinit();
+    try log.appendLob(0.0, 0, .lob_add, "bid", 1.0, 2.0, 5.0, false, false);
+    try log.appendLob(0.1, 1, .lob_execute, "bid", 1.0, 1.0, 0.0, true, true);
+    try log.appendLob(0.2, 2, .lob_cancel, "bid", 1.0, 1.0, 0.0, true, false);
+    try std.testing.expect(log.seq == 3);
+    try std.testing.expect(std.mem.indexOf(u8, log.bytes(), "\"type\":\"LobAdd\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, log.bytes(), "\"type\":\"LobExecute\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, log.bytes(), "\"type\":\"LobCancel\"") != null);
+    const r = replayJsonl(log.bytes());
+    try std.testing.expect(r.n_events == 3);
+    try std.testing.expect(r.last_seq == 3);
 }
 
 test "same seed path produces stable hash string length" {

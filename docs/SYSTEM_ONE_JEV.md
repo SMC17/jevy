@@ -28,6 +28,8 @@
 
 Jev is **not** this chat assistant. It never emits free-form text on the trading path. It never emits orders. Code owns control flow; Jev only answers narrow typed questions.
 
+Live `TYPESAFE_API_KEY` wiring is optional. This tree does not require a key: `DeterministicFallbackClient` answers the same Choice / Score / Noul questions offline. Do not invent a key.
+
 From TypeSafe’s design rules ([how-to-build](https://docs.typesafe.ai/concepts/how-to-build-with-system-one.md)):
 
 1. **Code owns control flow** — deterministic AS / Black–Scholes / greeks math stays in Python.
