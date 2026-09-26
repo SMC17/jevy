@@ -54,16 +54,23 @@ Status legend: **done** (pre-existing) · **landed this PR** · **future**
 | TypeSafe / Jev decision layer | done | `decisions/` — Choice/Score/Noul; never emits orders |
 | Multi-strike strip quoting | done | `multi_strike.zig` |
 | Guéant asymptotics | done | `gueant.zig` |
+| Guéant ODE / spectral + (A, k) tape | **landed** | `gueant_ode.zig` — see [FRONTIERS.md](./FRONTIERS.md) |
+| SVI / SSVI + arb + sticky regimes | **landed** | `svi.zig` |
+| Multi-expiry vega / vanna / volga | **landed** | `term_book.zig` |
+| Queue-aware LOB fills | **landed** | `lob.zig` (synthetic) |
 | American / local-vol / Heston | **future** | See MODULES upgrade path |
 | Live venue / broker SDKs | **out of scope** | Sim/paper only |
+| Live `TYPESAFE_API_KEY` | **not required** | Hooks exist; fallback is the default |
 
 ## Demos
 
 ```bash
 cd zig && zig build demo -- --hedge-scenario
+cd zig && zig build frontiers
 cd .. && source .venv/bin/activate && python -m jev_omm.demo_desk
+python -m jev_omm.demo_frontiers
 ```
 
 ## Version
 
-C ABI `jev_omm_version` → `0.3.0-zig-akuna-depth`.
+C ABI `jev_omm_version` → `0.4.0-zig-frontiers-1-4`.

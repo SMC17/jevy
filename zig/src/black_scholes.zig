@@ -87,15 +87,20 @@ pub fn greeks(spot: f64, strike: f64, t: f64, rate: f64, div_yield: f64, iv: f64
     const sqrt_t = @sqrt(t);
     const gamma = dq * pdf_d1 / (spot * iv * sqrt_t);
     const vega = spot * dq * pdf_d1 * sqrt_t;
+    // vanna = ∂Δ/∂σ = −e^{−qT} n(d1) d2 / σ
+    // volga = ∂ν/∂σ = ν · d1 · d2 / σ
+    // Identical for calls and puts (vega itself does not depend on the right).
+    const vanna = -dq * pdf_d1 * d.d2 / iv;
+    const volga = vega * d.d1 * d.d2 / iv;
 
     if (is_call) {
         const delta = dq * normCdf(d.d1);
         const theta = -spot * dq * pdf_d1 * iv / (2.0 * sqrt_t) - rate * strike * df * normCdf(d.d2) + div_yield * spot * dq * normCdf(d.d1);
-        return .{ .delta = delta, .gamma = gamma, .vega = vega, .theta = theta };
+        return .{ .delta = delta, .gamma = gamma, .vega = vega, .theta = theta, .vanna = vanna, .volga = volga };
     } else {
         const delta = -dq * normCdf(-d.d1);
         const theta = -spot * dq * pdf_d1 * iv / (2.0 * sqrt_t) + rate * strike * df * normCdf(-d.d2) - div_yield * spot * dq * normCdf(-d.d1);
-        return .{ .delta = delta, .gamma = gamma, .vega = vega, .theta = theta };
+        return .{ .delta = delta, .gamma = gamma, .vega = vega, .theta = theta, .vanna = vanna, .volga = volga };
     }
 }
 
@@ -141,4 +146,36 @@ test "higher spot higher call price" {
 test "expiry intrinsic" {
     try std.testing.expect(@abs(price(110.0, 100.0, 0.0, 0.05, 0.0, 0.2, true) - 10.0) < 1e-12);
     try std.testing.expect(@abs(price(90.0, 100.0, 0.0, 0.05, 0.0, 0.2, false) - 10.0) < 1e-12);
+}
+
+test "vanna matches delta finite difference" {
+    const s: f64 = 100.0;
+    const k: f64 = 100.0;
+    const t: f64 = 0.5;
+    const r: f64 = 0.03;
+    const q: f64 = 0.01;
+    const iv: f64 = 0.25;
+    const g = greeks(s, k, t, r, q, iv, true);
+    const eps: f64 = 1e-4;
+    const d_up = greeks(s, k, t, r, q, iv + eps, true).delta;
+    const d_dn = greeks(s, k, t, r, q, iv - eps, true).delta;
+    const fd = (d_up - d_dn) / (2.0 * eps);
+    try std.testing.expect(@abs(g.vanna - fd) < 1e-4);
+    const g_put = greeks(s, k, t, r, q, iv, false);
+    try std.testing.expect(@abs(g.vanna - g_put.vanna) < 1e-12);
+}
+
+test "volga matches vega finite difference" {
+    const s: f64 = 105.0;
+    const k: f64 = 100.0;
+    const t: f64 = 0.4;
+    const r: f64 = 0.02;
+    const q: f64 = 0.0;
+    const iv: f64 = 0.3;
+    const g = greeks(s, k, t, r, q, iv, false);
+    const eps: f64 = 1e-4;
+    const v_up = greeks(s, k, t, r, q, iv + eps, false).vega;
+    const v_dn = greeks(s, k, t, r, q, iv - eps, false).vega;
+    const fd = (v_up - v_dn) / (2.0 * eps);
+    try std.testing.expect(@abs(g.volga - fd) < 1e-3);
 }

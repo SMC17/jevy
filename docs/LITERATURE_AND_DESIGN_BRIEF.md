@@ -1,7 +1,7 @@
 # Literature and Design Brief — Equity Options Market-Making Research System
 
 **Owner:** Sean Collins  
-**Repo root:** `/workspace/jev-options-mm/`  
+**Repo root:** jevy ([SMC17/jevy](https://github.com/SMC17/jevy))  
 **Scope:** Simulation / paper research only — no live exchange keys, no production routing  
 **Companion docs:** [ARCHITECTURE.md](./ARCHITECTURE.md), [SYSTEM_ONE_JEV.md](./SYSTEM_ONE_JEV.md)
 
@@ -74,7 +74,7 @@ Real public URLs (career/engineering narrative, not strategy whitepapers):
 - https://arxiv.org/abs/1105.3115 · PDF https://arxiv.org/pdf/1105.3115  
 - Inventory-limited AS; HJB → linear ODE system; asymptotic quotes via spectral / closed-form approximations; extensions: drift, market impact / adverse selection.
 
-**Landed (v1):** asymptotic closed-form quotes in `gueant.zig` / `gueant.py` (toggle `QuoterConfig.mode`); later: full ODE/spectral eigenvector + impact/adverse-selection term ξ.
+**Landed:** asymptotic closed form (`gueant.zig`) and the finite-horizon linear ODE / principal eigenmode (`gueant_ode.zig`), toggled by `QuoterConfig.mode` (`as_finite_horizon` | `gueant_asymptotic` | `gueant_ode`). \((A,k)\) MLE from a synthetic tape. Market-impact extension of the intensity is still future.
 
 ### 2.3 Cartea–Jaimungal–Penalva
 - Book: *Algorithmic and High-Frequency Trading* (CUP, 2015) — https://www.cambridge.org/core/books/algorithmic-and-highfrequency-trading/  
@@ -95,7 +95,8 @@ Real public URLs (career/engineering narrative, not strategy whitepapers):
 | --- | --- | --- |
 | **Greek-aware quoting** | Penalize quotes by projected Δ/Γ/ν inventory after fill; AS reservation on **delta-normalized** inventory | Desk practice + AS inventory term |
 | **Delta hedge** | Separate Hedge module; urgency from inventory + System One `hedge_now` noul | Standard MM decomposition |
-| **IV surface / SABR** | Fair value from fitted surface; Hagan et al. SABR (“Managing Smile Risk”, Wilmott 2002) — https://www.wilmott.com/managing-smile-risk/ | Parametric surface module |
+| **IV surface / SVI** | Raw SVI and SSVI total variance, butterfly \(g(k)\), calendar monotonicity, sticky-strike vs sticky-delta | Gatheral & Jacquier, https://arxiv.org/abs/1204.0646 |
+| **IV surface / SABR** | One-slice alternative; Hagan et al. SABR (“Managing Smile Risk”, Wilmott 2002) — https://www.wilmott.com/managing-smile-risk/ | `surface.zig` |
 | **Adverse selection** | VPIN / flow toxicity (Easley, López de Prado, O’Hara — *Flow Toxicity and Liquidity…*, RFS) DOI https://doi.org/10.1093/rfs/hhs053; intro note https://www.quantresearch.org/From%20PIN%20to%20VPIN.pdf; Kyle λ as price-impact per flow | Score/Noul battery in Decision Layer |
 | **Surface residual gates** | `surface_suspect` noul + RMSE/z-score rules | Jane Street options tooling themes (surface as traded object) |
 
