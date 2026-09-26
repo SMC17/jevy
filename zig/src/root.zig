@@ -17,6 +17,10 @@ pub const combos = @import("combos.zig");
 pub const hedge = @import("hedge.zig");
 pub const toxicity = @import("toxicity.zig");
 pub const scenario = @import("scenario.zig");
+pub const svi = @import("svi.zig");
+pub const gueant_ode = @import("gueant_ode.zig");
+pub const lob = @import("lob.zig");
+pub const term_book = @import("term_book.zig");
 pub const c_abi = @import("c_abi.zig");
 
 test {
@@ -36,5 +40,9 @@ test {
     _ = hedge;
     _ = toxicity;
     _ = scenario;
+    _ = svi;
+    _ = gueant_ode;
+    _ = lob;
+    _ = term_book;
     _ = c_abi;
 }

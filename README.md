@@ -10,8 +10,8 @@ Zig hot path (pricing, quoters, risk, fills, surface, hedge, event log) plus a P
 
 | Layer | Language | Role |
 | --- | --- | --- |
-| **Hot path** | **Zig 0.16** (`zig/`) | Black–Scholes, Avellaneda–Stoikov, risk limits, Poisson fills, mark PnL — C ABI `.so` for Python |
-| **Research glue** | Python (`jev_omm/`) | Config, TypeSafe System One / Jev decisions, SABR/parametric surface glue, markout, demo, tests |
+| **Hot path** | **Zig 0.16** (`zig/`) | BS + vanna/volga, A–S, Guéant asymptotic **and ODE**, SVI/SSVI, multi-expiry term risk, Poisson **and queue** fills, hedge, event log — C ABI `.so` for Python |
+| **Research glue** | Python (`jev_omm/`) | Config, TypeSafe System One / Jev decisions (Choice/Score/Noul only), surface/quoter mirrors, demos, tests |
 | **Abandoned** | `_abandoned_rust/` | Early Rust spike — do not build; Zig is the chosen hot path |
 
 Classical **A–S reservation price stays pure math**. Jev answers only feed `policy.py` → `QuoteAdjustments`.
@@ -29,6 +29,7 @@ zig build test                      # unit tests
 zig build demo                      # pure-Zig paper sim (+ JSONL event log)
 zig build demo -- --multi-strike --gueant   # 5-strike strip + Guéant asymptotics
 zig build demo -- --hedge-scenario          # parity/box + banded hedge + greek PnL + scenarios
+zig build frontiers                         # SVI, multi-expiry term risk, LOB, Guéant ODE
 zig build replay -- jev_omm_events.jsonl   # recompute markout/PnL from log
 zig build -Doptimize=ReleaseFast    # libjev_omm.so + demo + bench bins
 zig build bench -Doptimize=ReleaseFast
@@ -59,6 +60,7 @@ python -c "from jev_omm.pricing import ZIG_AVAILABLE, native_version; print(ZIG_
 python -m jev_omm.demo
 python -m jev_omm.demo_multistrike --gueant
 python -m jev_omm.demo_desk          # Akuna curriculum desk demo
+python -m jev_omm.demo_frontiers     # SVI + term book + LOB + Guéant ODE
 pytest -q
 ```
 
@@ -98,34 +100,36 @@ zig build replay -- jev_omm_events.jsonl # deterministic markout/PnL recompute
 | `hedge.zig` | Banded Δ hedge, slippage, greek PnL buckets |
 | `toxicity.zig` | Research-grade VPIN-style / imbalance features |
 | `scenario.zig` | Spot×IV scenario risk matrix |
-| `as_quoter.zig` | A–S reservation + spread + greek penalties |
-| `gueant.zig` / `multi_strike.zig` | Guéant asymptotics + desk strip |
+| `as_quoter.zig` | A–S reservation + spread + greek penalties; routes `gueant_ode` |
+| `gueant.zig` / `gueant_ode.zig` | Asymptotic closed form **and** finite-horizon / spectral ODE (arXiv 1105.3115); \((A,k)\) MLE |
+| `multi_strike.zig` / `term_book.zig` | Single-expiry strip; multi-expiry book, bucket vega, vanna, volga, term slope |
+| `svi.zig` | Raw SVI + SSVI, butterfly/calendar gates, sticky strike/delta, calibration |
 | `risk_limits.zig` | Hard inventory / greek / PnL stops |
-| `fills.zig` | Poisson fill sampler |
-| `surface.zig` | Hagan SABR-lite IV |
+| `fills.zig` / `lob.zig` | Poisson fills; queue/LOB model (depth, latency, partials, toxic markout) |
+| `surface.zig` | Hagan SABR-lite IV (kept; SVI is the primary research surface) |
 | `markout.zig` | Spread / markout / inventory attribution |
 | `pnl.zig` | Mark-to-model PnL |
-| `c_abi.zig` | Exported C ABI for Python ctypes (`0.3.0-zig-akuna-depth`) |
-| `event_log.zig` | Sequenced JSONL (+ HedgeFill / GreekPnl) + SHA-256 + replay |
-| `demo.zig` / `replay.zig` / `bench.zig` | Paper demo (`--hedge-scenario`), log replay, microbenchmarks |
+| `c_abi.zig` | Exported C ABI for Python ctypes (`0.4.0-zig-frontiers-1-4`) |
+| `event_log.zig` | Sequenced JSONL (+ LobAdd / LobExecute / LobCancel) + SHA-256 + replay |
+| `demo.zig` / `demo_frontiers.zig` / `replay.zig` / `bench.zig` | Paper demos, log replay, microbenchmarks |
 
 ### Python (`jev_omm/`)
 
 | Package | Role |
 | --- | --- |
 | `pricing/` | `_native.py` (Zig ctypes) → BS / parity / combos |
-| `surface/` | SABR-lite (Zig preferred) + PLACEHOLDER parametric |
+| `surface/` | **SVI/SSVI** (primary) + SABR-lite + PLACEHOLDER parametric |
 | `hedge/` | Banded delta hedge + greek PnL (Zig preferred) |
 | `flow/` | Research-grade toxicity features → Decision state |
 | `pnl/` | Mark PnL + markout attribution |
-| `quoter/` | Pure-Python A–S / Guéant / multi-strike |
-| `decisions/` | TypeSafe System One schemas, client (SDK→HTTP→fallback), policy |
+| `quoter/` | A–S / Guéant asymptotic / **Guéant ODE** / multi-strike |
+| `decisions/` | TypeSafe System One schemas, client (SDK→HTTP→fallback), policy. No live key required |
 | `obs/event_log.py` | JSONL reader/replay for notebooks |
-| `risk/` | Hard limits + scenario matrix |
-| `execution/` / `backtest/` | Sim glue |
-| `demo.py` / `demo_desk.py` | Paper demos |
+| `risk/` | Hard limits, scenario matrix, **multi-expiry term risk** |
+| `execution/` / `backtest/` | Poisson fills + **queue/LOB** sim |
+| `demo.py` / `demo_desk.py` / `demo_frontiers.py` | Paper demos |
 
-Docs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/PERF.md`](docs/PERF.md) · [`docs/MODULES.md`](docs/MODULES.md) · [`docs/AKUNA_AND_DESK_CURRICULUM.md`](docs/AKUNA_AND_DESK_CURRICULUM.md)
+Docs: [`docs/FRONTIERS.md`](docs/FRONTIERS.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/PERF.md`](docs/PERF.md) · [`docs/MODULES.md`](docs/MODULES.md) · [`docs/AKUNA_AND_DESK_CURRICULUM.md`](docs/AKUNA_AND_DESK_CURRICULUM.md)
 
 ## License
 

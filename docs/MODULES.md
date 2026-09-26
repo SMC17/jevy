@@ -18,18 +18,17 @@ European Black–Scholes–Merton analytic price + delta/gamma/vega/theta.
 | `parity.py` / `parity.zig` | PCP, synthetics/CR, boxes + implied rate (executable sides) |
 | `combos.py` / `combos.zig` | Vertical / fly / straddle / strangle package theos |
 
-**Real today.** **Upgrade:** American (tree/PDE), local vol, Heston, dividend schedules, discrete cash dividends; rho greek export.
+**Real today**, including vanna (\(\partial^2V/\partial S\partial\sigma\)) and volga (\(\partial^2V/\partial\sigma^2\)). **Upgrade:** American (tree/PDE), local vol, Heston, dividend schedules, discrete cash dividends; rho greek export.
 
 ## `surface/`
 
 | Impl | Role |
 | --- | --- |
+| `svi.py` / `svi.zig` | **Primary.** Raw SVI + power-law SSVI, Nelder–Mead fit, butterfly/calendar gates, sticky-strike vs sticky-delta. Cite https://arxiv.org/abs/1204.0646 |
 | `SabrIVSurface` | Hagan SABR-lite (Zig `surface.zig` / `jev_omm_sabr_iv` when `.so` present; Python Hagan fallback otherwise) |
 | `ParametricIVSurface` | Explicitly labeled **PLACEHOLDER** toy smile (ATM + skew + smile in log-moneyness) |
 
-ATM limit and edge cases documented in `zig/src/surface.zig` and `jev_omm/surface/sabr.py`.
-
-**Upgrade:** SVI/SSVI calibration, arbitrage checks, term structure, sticky-delta vs sticky-strike.
+ATM limit and edge cases documented in `zig/src/surface.zig` and `jev_omm/surface/sabr.py`. SVI conventions: [`FRONTIERS.md`](./FRONTIERS.md).
 
 ## `quoter/`
 
@@ -37,11 +36,10 @@ ATM limit and edge cases documented in `zig/src/surface.zig` and `jev_omm/surfac
 | --- | --- |
 | `avellaneda_stoikov.py` / `as_quoter.zig` | Classic A–S finite-horizon reservation + half-spread |
 | `gueant.py` / `gueant.zig` | Guéant–Lehalle–Fernandez-Tapia asymptotics (arXiv 1105.3115) |
+| `gueant_ode.py` / `gueant_ode.zig` | Finite-horizon ODE + principal eigenmode; Poisson MLE for \((A,k)\) on a synthetic tape |
 | `multi_strike.py` / `multi_strike.zig` | Desk strip (≈5 strikes), shared portfolio-Δ tilt |
 
-Toggle via `QuoterConfig.mode` ∈ `{as_finite_horizon, gueant_asymptotic}`. `spread_mult` / `size_mult` from decisions layer.
-
-**Upgrade:** full Guéant ODE / spectral eigenvector quotes; multi-level quotes; adverse-selection intensity estimation.
+Toggle via `QuoterConfig.mode` ∈ `{as_finite_horizon, gueant_asymptotic, gueant_ode}`. `spread_mult` / `size_mult` from decisions layer.
 
 ## `decisions/` (TypeSafe System One / Jev)
 
@@ -65,6 +63,7 @@ Hard inventory / delta / vega / gamma / loss limits → `quoting_allowed=False`.
 | --- | --- |
 | `limits.py` / `risk_limits.zig` | Hard stops |
 | `scenario.py` / `scenario.zig` | Spot×IV shock grid (Taylor or reprice); soft/hard hooks |
+| `term.py` / `term_book.zig` | Multi-expiry greeks, bucket vega, term-structure slope, vanna/volga limits, tilt scenarios |
 
 **Upgrade:** VaR/ES, kill-switch webhooks (still paper until wired carefully).
 
@@ -80,9 +79,9 @@ Research-grade rolling imbalance / simplified VPIN-style buckets → Decision `f
 
 ## `execution/`
 
-Poisson fills with intensity decaying in distance-from-mid.
+Poisson fills (`fills.py`) with intensity decaying in distance-from-mid, plus a synthetic queue model (`lob.py` / `lob.zig`): depth, queue position, cancel latency, partial fills, adverse-selection markout, sequenced LobAdd / LobExecute / LobCancel.
 
-**Upgrade:** LOB replay, queue position, latency, partial cancels.
+**Upgrade:** historical LOB replay (still no live market-data session).
 
 ## `backtest/`
 

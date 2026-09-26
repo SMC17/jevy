@@ -41,7 +41,7 @@ pub const CQuoterConfig = extern struct {
     min_half_spread: f64,
     max_half_spread: f64,
     quote_size: i32,
-    /// 0 = as_finite_horizon, 1 = gueant_asymptotic
+    /// 0 = as_finite_horizon, 1 = gueant_asymptotic, 2 = gueant_ode
     mode: i32 = 0,
     /// Guéant mid-touch intensity A
     A: f64 = 140.0,
@@ -94,7 +94,11 @@ fn toQuoterConfig(cfg: *const CQuoterConfig) types.QuoterConfig {
         .quote_size = cfg.quote_size,
         .A = cfg.A,
         .portfolio_delta_penalty = cfg.portfolio_delta_penalty,
-        .mode = if (cfg.mode == 1) .gueant_asymptotic else .as_finite_horizon,
+        .mode = switch (cfg.mode) {
+            1 => .gueant_asymptotic,
+            2 => .gueant_ode,
+            else => .as_finite_horizon,
+        },
     };
 }
 
@@ -660,7 +664,86 @@ export fn jev_omm_scenario_taylor(
     return scenario.taylorPnl(&g, d_spot, d_iv);
 }
 
+export fn jev_omm_vanna(
+    spot: f64,
+    strike: f64,
+    t: f64,
+    rate: f64,
+    div_yield: f64,
+    iv: f64,
+    is_call: i32,
+) callconv(.c) f64 {
+    return bs.greeks(spot, strike, t, rate, div_yield, iv, is_call != 0).vanna;
+}
+
+export fn jev_omm_volga(
+    spot: f64,
+    strike: f64,
+    t: f64,
+    rate: f64,
+    div_yield: f64,
+    iv: f64,
+    is_call: i32,
+) callconv(.c) f64 {
+    return bs.greeks(spot, strike, t, rate, div_yield, iv, is_call != 0).volga;
+}
+
+export fn jev_omm_svi_total_var(a: f64, b: f64, rho: f64, m: f64, sigma: f64, k: f64) callconv(.c) f64 {
+    const svi = @import("svi.zig");
+    return svi.totalVar(.{ .a = a, .b = b, .rho = rho, .m = m, .sigma = sigma }, k);
+}
+
+export fn jev_omm_svi_iv(a: f64, b: f64, rho: f64, m: f64, sigma: f64, k: f64, t: f64) callconv(.c) f64 {
+    const svi = @import("svi.zig");
+    return svi.impliedVol(.{ .a = a, .b = b, .rho = rho, .m = m, .sigma = sigma }, k, t);
+}
+
+export fn jev_omm_svi_density_g(a: f64, b: f64, rho: f64, m: f64, sigma: f64, k: f64) callconv(.c) f64 {
+    const svi = @import("svi.zig");
+    return svi.densityG(.{ .a = a, .b = b, .rho = rho, .m = m, .sigma = sigma }, k);
+}
+
+export fn jev_omm_svi_butterfly_ok(a: f64, b: f64, rho: f64, m: f64, sigma: f64) callconv(.c) i32 {
+    const svi = @import("svi.zig");
+    return if (svi.butterflyCheck(.{ .a = a, .b = b, .rho = rho, .m = m, .sigma = sigma }).ok) 1 else 0;
+}
+
+export fn jev_omm_ssvi_total_var(theta: f64, rho: f64, eta: f64, gamma: f64, k: f64) callconv(.c) f64 {
+    const svi = @import("svi.zig");
+    return svi.ssviTotalVar(k, theta, .{ .rho = rho, .eta = eta, .gamma = gamma });
+}
+
+export fn jev_omm_gueant_ode_offsets(
+    gamma: f64,
+    kappa: f64,
+    sigma: f64,
+    A: f64,
+    inventory: i32,
+    inventory_cap: i32,
+    horizon: f64,
+    n_steps: i32,
+    out_delta_b: *f64,
+    out_delta_a: *f64,
+) callconv(.c) void {
+    const ode = @import("gueant_ode.zig");
+    const cfg = types.QuoterConfig{
+        .gamma = gamma,
+        .kappa = kappa,
+        .sigma = sigma,
+        .A = A,
+        .inventory_cap = inventory_cap,
+        .t_horizon = horizon,
+        .ode_steps = if (n_steps > 0) @intCast(n_steps) else 1,
+        .min_half_spread = 1e-8,
+        .max_half_spread = 1e6,
+        .mode = .gueant_ode,
+    };
+    const o = ode.optimalOffsets(&cfg, inventory);
+    out_delta_b.* = o.delta_b;
+    out_delta_a.* = o.delta_a;
+}
+
 export fn jev_omm_version() callconv(.c) [*:0]const u8 {
-    return "0.3.0-zig-akuna-depth";
+    return "0.4.0-zig-frontiers-1-4";
 }
 

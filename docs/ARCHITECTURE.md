@@ -1,7 +1,7 @@
 # Architecture — Jev Options Market-Making Research System
 
 **Owner:** Sean Collins  
-**Code package:** Zig hot path `zig/` + Python glue `jev_omm/` under `/workspace/jev-options-mm/`  
+**Code package:** Zig hot path `zig/` + Python glue `jev_omm/` at the **jevy** repo root ([SMC17/jevy](https://github.com/SMC17/jevy)).  
 **Mode:** simulation / paper replay only (no live exchange credentials)  
 **Companions:** [LITERATURE_AND_DESIGN_BRIEF.md](./LITERATURE_AND_DESIGN_BRIEF.md) · [SYSTEM_ONE_JEV.md](./SYSTEM_ONE_JEV.md) · [PERF.md](./PERF.md)
 
@@ -11,7 +11,7 @@
 
 | Concern | Implementation |
 | --- | --- |
-| BS price + greeks, A–S / **Guéant asymptotic** quote, multi-strike strip, hard risk, Poisson fills, SABR-lite IV, markout attribution, mark PnL, **parity/boxes/combos**, **banded hedge + greek PnL**, **scenario matrix**, **toxicity features**, **sequenced event log + replay** | **Zig** (`zig/src/`), shipped as `libjev_omm.so` (C ABI) |
+| BS price + greeks (incl. vanna/volga), A–S / **Guéant asymptotic and ODE**, multi-strike strip, **multi-expiry term risk**, hard risk, Poisson **and queue** fills, SABR-lite **and SVI/SSVI**, markout, mark PnL, parity/boxes/combos, banded hedge, scenario matrix, toxicity, sequenced event log + replay | **Zig** (`zig/src/`), shipped as `libjev_omm.so` (C ABI) |
 | TypeSafe / Jev decisions, policy, config, surface glue (prefer Zig SABR), paper demo orchestration, JSONL notebooks | **Python** (`jev_omm/`) — research glue only |
 | Python default pricing import | `jev_omm.pricing` → ctypes Zig if `.so` present, else pure Python |
 
@@ -64,7 +64,7 @@ MarketData ──► Surface / FairValue ──► Quoter (AS + greek penalties)
 - **Non-goal (v0):** FPGA / kernel-bypass feeds (documented only as future shape).
 
 ### 3.2 Surface / FairValue
-- Fit IV surface (v0+: **Hagan SABR-lite** in Zig + Python; parametric placeholder retained).
+- Fit IV surface: **raw SVI / SSVI** is the primary research surface (`svi.zig`); Hagan SABR-lite remains for one-slice work; parametric placeholder retained. Butterfly (density) and calendar checks set `surface_suspect`. Sticky-strike vs sticky-delta is an explicit regime when spot moves. See [FRONTIERS.md](./FRONTIERS.md).
 - Emit `FairValue(option_id) → mid, bid_fv, ask_fv, greeks, residual_z, fit_rmse`.
 - Freeze / previous-fit fallback when Decision marks `surface_suspect` or fit explodes.
 
@@ -76,11 +76,13 @@ MarketData ──► Surface / FairValue ──► Quoter (AS + greek penalties)
 - **Scenario matrix:** spot×IV shock grid with soft/hard loss hooks (Akuna 201 risk analysis).
 
 ### 3.3 Quoter (AS / Guéant + greek penalties)
-- Deterministic AS **or** Guéant–Lehalle–Fernandez-Tapia asymptotics (`QuoterConfig.mode`):
+- Deterministic AS **or** Guéant–Lehalle–Fernandez-Tapia (`QuoterConfig.mode`):
   - `as_finite_horizon`: classic A–S reservation/spread with rolling horizon T−t
   - `gueant_asymptotic`: stationary closed form (arXiv 1105.3115) with mid-touch intensity A
-  - reservation from inventory; half-spread from (A, k, γ, σ)
+  - `gueant_ode`: finite-horizon ODE / principal eigenmode of the linear system, inventory cap Q
+  - reservation from inventory; half-spread from (A, k, γ, σ); (A, k) can be fit from a synthetic tape
 - **Multi-strike strip** (`multi_strike.zig`): 5 strikes around spot, shared portfolio-Δ tilt
+- **Multi-expiry book** (`term_book.zig`): bucket vega, term-structure slope, vanna, volga, per-expiry scenario tilt
 - **Greek penalties:** per-contract Γ/ν + `portfolio_delta_penalty`
 - **Out:** `Quote{reservation, half_spread, size}` (+ `strike` on event log) *before* Decision scaling.
 - **Must not** call System One.

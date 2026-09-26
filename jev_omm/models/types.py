@@ -21,8 +21,10 @@ class OptionRight(str, Enum):
 class Greeks(BaseModel):
     delta: float
     gamma: float
-    vega: float  # per 1.0 vol point (i.e. ∂V/∂σ, σ in decimal)
+    vega: float  # ∂V/∂σ, σ in decimal (not per vol point)
     theta: float  # per year (calendar)
+    vanna: float = 0.0  # ∂²V/∂S∂σ
+    volga: float = 0.0  # ∂²V/∂σ²
 
 
 class OptionContract(BaseModel):

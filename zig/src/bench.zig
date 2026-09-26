@@ -199,6 +199,45 @@ fn doHedgeProposeApply(i: usize) f64 {
     return o.underlier_qty + f.fill_price + step.gamma_pnl + step.total();
 }
 
+const svi = root.svi;
+const ode = root.gueant_ode;
+const term = root.term_book;
+
+const svi_params = svi.SviParams{ .a = 0.04, .b = 0.12, .rho = -0.3, .m = 0.0, .sigma = 0.2 };
+
+fn doSviIv(i: usize) f64 {
+    const k = blackBox(-0.5 + @as(f64, @floatFromInt(i % 40)) * 0.025);
+    return svi.impliedVol(svi_params, k, 0.25) + svi.densityG(svi_params, k);
+}
+
+fn doGueantOde(i: usize) f64 {
+    const cfg = types.QuoterConfig{
+        .gamma = 0.1,
+        .kappa = 1.5,
+        .sigma = 0.45,
+        .A = 120.0,
+        .t_horizon = 0.25,
+        .inventory_cap = 8,
+        .ode_steps = 200,
+        .min_half_spread = 0.01,
+        .max_half_spread = 10.0,
+        .mode = .gueant_ode,
+    };
+    const o = ode.optimalOffsets(&cfg, @as(i32, @intCast(i % 7)) - 3);
+    return o.delta_b + o.delta_a;
+}
+
+fn doTermAggregate(i: usize) f64 {
+    const spot = blackBox(100.0 + @as(f64, @floatFromInt(i % 10)) * 0.1);
+    const legs = [_]term.Leg{
+        .{ .expiry = 0.1, .strike = 100.0, .qty = 3.0, .iv = 0.22 },
+        .{ .expiry = 0.4, .strike = 105.0, .qty = -2.0, .iv = 0.24 },
+        .{ .expiry = 1.0, .strike = 95.0, .qty = 1.0, .iv = 0.2 },
+    };
+    const book = term.aggregate(spot, 0.03, 0.0, &legs);
+    return book.vega + book.vanna + book.volga + book.term_vega_slope;
+}
+
 fn doScenarioMatrix(i: usize) f64 {
     const g = types.Greeks{
         .delta = blackBox(@as(f64, @floatFromInt(i % 10)) - 5.0),
@@ -227,4 +266,7 @@ pub fn main() void {
     benchOne("combos/straddle_theo", 1_000_000, &doStraddleTheo);
     benchOne("hedge/propose_apply_greek_pnl", 1_000_000, &doHedgeProposeApply);
     benchOne("scenario/matrix_7x5", 200_000, &doScenarioMatrix);
+    benchOne("surface/svi_iv_and_density_g", 1_000_000, &doSviIv);
+    benchOne("gueant/ode_offsets_q8_200steps", 2_000, &doGueantOde);
+    benchOne("term/aggregate_3_expiries", 200_000, &doTermAggregate);
 }

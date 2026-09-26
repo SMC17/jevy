@@ -8,16 +8,23 @@ pub const Side = enum(u8) {
 /// Quoter closed-form family.
 /// - `as_finite_horizon`: classic Avellaneda–Stoikov reservation/spread with T−t.
 /// - `gueant_asymptotic`: Guéant–Lehalle–Fernandez-Tapia stationary approx (arXiv 1105.3115).
+/// - `gueant_ode`: finite-horizon / spectral ODE on the same intensity (arXiv 1105.3115 §3).
 pub const QuoteMode = enum(u8) {
     as_finite_horizon = 0,
     gueant_asymptotic = 1,
+    gueant_ode = 2,
 };
 
 pub const Greeks = struct {
     delta: f64 = 0.0,
     gamma: f64 = 0.0,
+    /// ∂V/∂σ with σ in decimal (not per vol point).
     vega: f64 = 0.0,
     theta: f64 = 0.0,
+    /// ∂²V/∂S∂σ = ∂Δ/∂σ. Same for calls and puts.
+    vanna: f64 = 0.0,
+    /// ∂²V/∂σ² = ∂ν/∂σ (volga / vomma). Same for calls and puts.
+    volga: f64 = 0.0,
 
     pub const zero: Greeks = .{};
 
@@ -27,6 +34,8 @@ pub const Greeks = struct {
             .gamma = self.gamma + other.gamma,
             .vega = self.vega + other.vega,
             .theta = self.theta + other.theta,
+            .vanna = self.vanna + other.vanna,
+            .volga = self.volga + other.volga,
         };
     }
 
@@ -36,6 +45,8 @@ pub const Greeks = struct {
             .gamma = self.gamma * w,
             .vega = self.vega * w,
             .theta = self.theta * w,
+            .vanna = self.vanna * w,
+            .volga = self.volga * w,
         };
     }
 };
@@ -90,6 +101,10 @@ pub const QuoterConfig = struct {
     t_horizon: f64 = 1.0 / 252.0,
     /// Guéant mid-touch arrival intensity A (1/year). Unused by classic AS.
     A: f64 = 140.0,
+    /// Inventory bound Q for `gueant_ode` (state q ∈ [−Q, Q]).
+    inventory_cap: i32 = 10,
+    /// RK4 steps for the Guéant ODE over `t_horizon`.
+    ode_steps: u32 = 800,
     gamma_penalty: f64 = 0.0,
     vega_penalty: f64 = 0.0,
     /// Extra reservation tilt per unit of *portfolio* delta (multi-strike desk).

@@ -97,6 +97,25 @@ pub fn build(b: *std.Build) void {
     replay_step.dependOn(&replay_run.step);
     replay_run.step.dependOn(b.getInstallStep());
 
+    // Frontiers demo: SVI, multi-expiry term risk, LOB, Guéant ODE
+    const frontiers = b.addExecutable(.{
+        .name = "jev_omm_frontiers",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/demo_frontiers.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "jev_omm", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(frontiers);
+
+    const frontiers_step = b.step("frontiers", "SVI, multi-expiry, LOB, and Guéant ODE paper demo");
+    const frontiers_run = b.addRunArtifact(frontiers);
+    frontiers_step.dependOn(&frontiers_run.step);
+    frontiers_run.step.dependOn(b.getInstallStep());
+
     // Unit tests
     const mod_tests = b.addTest(.{
         .root_module = mod,

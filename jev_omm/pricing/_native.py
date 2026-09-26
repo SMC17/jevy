@@ -236,6 +236,14 @@ def _bind(lib: ctypes.CDLL) -> None:
     ]
     lib.jev_omm_butterfly_call_theo.restype = None
 
+    if hasattr(lib, "jev_omm_vanna"):
+        lib.jev_omm_vanna.argtypes = [
+            c_double, c_double, c_double, c_double, c_double, c_double, c_int32
+        ]
+        lib.jev_omm_vanna.restype = c_double
+        lib.jev_omm_volga.argtypes = lib.jev_omm_vanna.argtypes
+        lib.jev_omm_volga.restype = c_double
+
 
 _lib = _load()
 if _lib is not None:
@@ -273,7 +281,11 @@ if ZIG_AVAILABLE:
     ) -> Greeks:
         out = _CGreeks()
         _lib.jev_omm_greeks(spot, strike, t, rate, div_yield, iv, int(is_call), ctypes.byref(out))
-        return Greeks(delta=out.delta, gamma=out.gamma, vega=out.vega, theta=out.theta)
+        vanna = volga = 0.0
+        if hasattr(_lib, "jev_omm_vanna"):
+            vanna = float(_lib.jev_omm_vanna(spot, strike, t, rate, div_yield, iv, int(is_call)))
+            volga = float(_lib.jev_omm_volga(spot, strike, t, rate, div_yield, iv, int(is_call)))
+        return Greeks(delta=out.delta, gamma=out.gamma, vega=out.vega, theta=out.theta, vanna=vanna, volga=volga)
 
     def price_and_greeks(
         spot: float,
