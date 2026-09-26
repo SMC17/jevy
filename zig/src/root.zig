@@ -21,6 +21,10 @@ pub const svi = @import("svi.zig");
 pub const gueant_ode = @import("gueant_ode.zig");
 pub const lob = @import("lob.zig");
 pub const term_book = @import("term_book.zig");
+pub const option_mm = @import("option_mm.zig");
+pub const hawkes = @import("hawkes.zig");
+pub const varswap = @import("varswap.zig");
+pub const training = @import("training.zig");
 pub const c_abi = @import("c_abi.zig");
 
 test {
@@ -44,5 +48,9 @@ test {
     _ = gueant_ode;
     _ = lob;
     _ = term_book;
+    _ = option_mm;
+    _ = hawkes;
+    _ = varswap;
+    _ = training;
     _ = c_abi;
 }

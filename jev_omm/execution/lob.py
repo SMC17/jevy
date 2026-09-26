@@ -83,6 +83,33 @@ def expected_fills(
     return min(our_size, traded)
 
 
+def queue_value(
+    spread_capture: float,
+    adverse_per_fill: float,
+    ahead: float,
+    our_size: float,
+    trade_intensity: float,
+    cancel_ahead: float,
+    horizon: float,
+    cancel_latency: float | None = None,
+) -> float:
+    """Fills × (spread − adverse). Deeper ahead shrinks the absolute value."""
+    fills = expected_fills(
+        ahead, our_size, trade_intensity, cancel_ahead, horizon, cancel_latency
+    )
+    return fills * (spread_capture - adverse_per_fill)
+
+
+def depth_ahead(levels: list[tuple[float, float]], our_index: int) -> float:
+    """Sum of depth strictly in front of our level. ``levels`` are (price, depth)."""
+    total = 0.0
+    for i, (_px, depth) in enumerate(levels):
+        if i >= our_index:
+            break
+        total += max(depth, 0.0)
+    return total
+
+
 def fill_markout(
     side: Side,
     price: float,

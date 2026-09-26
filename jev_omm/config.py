@@ -38,6 +38,8 @@ class QuoterConfig(BaseModel):
       - ``gueant_asymptotic``: Guéant–Lehalle–Fernandez-Tapia stationary
         closed form (arXiv 1105.3115); uses ``A`` mid-touch intensity.
       - ``gueant_ode``: finite-horizon / spectral ODE on the same intensity.
+      - ``option_vega``: Baldacci–Bergault–Guéant constant-vega grid
+        (arXiv 1907.12433). Portfolio vega = inventory × per-contract vega.
     """
 
     gamma: float = Field(default=0.1, description="Inventory risk aversion")
@@ -58,8 +60,20 @@ class QuoterConfig(BaseModel):
     quote_size: int = 1
     mode: str = Field(
         default="as_finite_horizon",
-        description="as_finite_horizon | gueant_asymptotic | gueant_ode",
+        description="as_finite_horizon | gueant_asymptotic | gueant_ode | option_vega",
     )
+    contract_vega: float = Field(default=10.0, description="Per-contract vega for option_vega")
+    xi: float = Field(default=1.0, description="Vol-of-vol in the quadratic vega penalty")
+    vega_limit: float = Field(default=40.0, description="Hard |portfolio vega| cap")
+    vol_edge: float = Field(default=0.0, description="(a_P - a_Q) / (2 sqrt(nu))")
+    option_rho: float = Field(default=0.0, description="Spot-vol correlation; penalty scales by (1-rho^2)")
+    iv_alpha: float = Field(default=0.0, description="Theo IV minus market IV (decimal)")
+    intensity_kind: str = Field(default="exponential", description="exponential | logistic")
+    logistic_lambda: float = 100.0
+    logistic_alpha: float = 0.7
+    logistic_beta: float = 150.0
+    option_grid_n: int = 31
+    option_grid_steps: int = 60
 
 
 class RiskConfig(BaseModel):

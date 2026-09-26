@@ -1,7 +1,8 @@
 # Akuna Options 101/201 + desk practice → code map
 
-**Repo:** `/workspace/jev-options-mm/`  
+**Repo:** [SMC17/jevy](https://github.com/SMC17/jevy)  
 **Mode:** simulation / paper only  
+**Version:** `0.5.0-zig-oom-citadel-lit`  
 **Public curriculum anchors (real URLs only):**
 - https://akunacapital.com/work-with-us/options-101/
 - Teachable Options 101 outline themes: terminology, how MM profits, futures/options, payoffs, time premium, **put-call parity**, theos & combination spreads, limits/boundaries, spreads/flies, theo & P&L, Greeks (delta hedge, gamma, theta, vol, vega, **rho & boxes**)
@@ -58,7 +59,15 @@ Status legend: **done** (pre-existing) · **landed this PR** · **future**
 | SVI / SSVI + arb + sticky regimes | **landed** | `svi.zig` |
 | Multi-expiry vega / vanna / volga | **landed** | `term_book.zig` |
 | Queue-aware LOB fills | **landed** | `lob.zig` (synthetic) |
-| American / local-vol / Heston | **future** | See MODULES upgrade path |
+| Queue value / depth ahead | **landed** | `queueValue`, `depthAhead` in `lob.zig`; `execution/lob.py` |
+| Citadel-style training cases | **landed** | `jev_omm/training/`, `zig/src/training.zig`, [TRAINING_CASES.md](./TRAINING_CASES.md) |
+| Option-vega inventory MM | **landed** | `option_mm.zig`, `quoter/option_mm.py`, mode `option_vega` |
+| Spot–vol hedge tilt | **landed** | `hedge.spotVolHedgeQty` / `hedge/delta.py` |
+| Hawkes toxic-burst intensity | **landed** | `hawkes.zig`, `flow/hawkes.py` → Decision `flow.hawkes_*` |
+| Dupire local vol (research) | **landed** | `surface/dupire.py` (Python) |
+| Rough Bergomi stress paths | **landed** | `surface/rough_vol.py` (not a quoter) |
+| Variance / vol swap weights | **landed** | `varswap.zig`, `pricing/varswap.py` |
+| American / Heston PDE | **future** | See MODULES upgrade path; Dupire local vol is the slice that landed |
 | Live venue / broker SDKs | **out of scope** | Sim/paper only |
 | Live `TYPESAFE_API_KEY` | **not required** | Hooks exist; fallback is the default |
 
@@ -67,10 +76,12 @@ Status legend: **done** (pre-existing) · **landed this PR** · **future**
 ```bash
 cd zig && zig build demo -- --hedge-scenario
 cd zig && zig build frontiers
+cd zig && zig build training
 cd .. && source .venv/bin/activate && python -m jev_omm.demo_desk
 python -m jev_omm.demo_frontiers
+python -m jev_omm.demo_training
 ```
 
 ## Version
 
-C ABI `jev_omm_version` → `0.4.0-zig-frontiers-1-4`.
+C ABI `jev_omm_version` → `0.5.0-zig-oom-citadel-lit`.

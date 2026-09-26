@@ -3,7 +3,9 @@
 **Owner:** Sean Collins  
 **Repo root:** jevy ([SMC17/jevy](https://github.com/SMC17/jevy))  
 **Scope:** Simulation / paper research only — no live exchange keys, no production routing  
-**Companion docs:** [ARCHITECTURE.md](./ARCHITECTURE.md), [SYSTEM_ONE_JEV.md](./SYSTEM_ONE_JEV.md)
+**Companion docs:** [ARCHITECTURE.md](./ARCHITECTURE.md), [SYSTEM_ONE_JEV.md](./SYSTEM_ONE_JEV.md), [LITERATURE_CANON.md](./LITERATURE_CANON.md) (citations mapped to modules), [TRAINING_CASES.md](./TRAINING_CASES.md), [FRONTIERS.md](./FRONTIERS.md)
+
+`0.5.0-zig-oom-citadel-lit` adds quoter mode `option_vega` (constant-vega inventory MM) and the training desk. The canon file is the citation index; this brief stays the design narrative.
 
 This brief consolidates **fetched** industry and academic sources into design principles for a professional equity-options MM research stack. Citations prefer pages actually retrieved; do not invent papers or URLs.
 
@@ -74,7 +76,11 @@ Real public URLs (career/engineering narrative, not strategy whitepapers):
 - https://arxiv.org/abs/1105.3115 · PDF https://arxiv.org/pdf/1105.3115  
 - Inventory-limited AS; HJB → linear ODE system; asymptotic quotes via spectral / closed-form approximations; extensions: drift, market impact / adverse selection.
 
-**Landed:** asymptotic closed form (`gueant.zig`) and the finite-horizon linear ODE / principal eigenmode (`gueant_ode.zig`), toggled by `QuoterConfig.mode` (`as_finite_horizon` | `gueant_asymptotic` | `gueant_ode`). \((A,k)\) MLE from a synthetic tape. Market-impact extension of the intensity is still future.
+**Landed:** asymptotic closed form (`gueant.zig`) and the finite-horizon linear ODE / principal eigenmode (`gueant_ode.zig`), toggled by `QuoterConfig.mode` (`as_finite_horizon` | `gueant_asymptotic` | `gueant_ode` | `option_vega`). \((A,k)\) MLE from a synthetic tape. Market-impact extension of the intensity is still future.
+
+### 2.5 Option inventory (constant vega)
+
+**Landed in `0.5.0`:** `QuoterConfig.mode = option_vega` routes reservation and half-spread through `option_mm.zig` / `jev_omm/quoter/option_mm.py`. Portfolio state is frozen vega \(V^\pi\). Premiums come from a small explicit-Euler HJB (exponential or logistic intensity) plus the Stoikov–Sağlam linear-intensity closed form. Spot–vol hedge tilt lives in `hedge.spotVolHedgeQty`. Citations and the toy parameter set: [LITERATURE_CANON.md](./LITERATURE_CANON.md). Cash A–S and Guéant stay the modes they were.
 
 ### 2.3 Cartea–Jaimungal–Penalva
 - Book: *Algorithmic and High-Frequency Trading* (CUP, 2015) — https://www.cambridge.org/core/books/algorithmic-and-highfrequency-trading/  

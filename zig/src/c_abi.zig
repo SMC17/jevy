@@ -41,7 +41,7 @@ pub const CQuoterConfig = extern struct {
     min_half_spread: f64,
     max_half_spread: f64,
     quote_size: i32,
-    /// 0 = as_finite_horizon, 1 = gueant_asymptotic, 2 = gueant_ode
+    /// 0 = as_finite_horizon, 1 = gueant_asymptotic, 2 = gueant_ode, 3 = option_vega
     mode: i32 = 0,
     /// Guéant mid-touch intensity A
     A: f64 = 140.0,
@@ -97,6 +97,7 @@ fn toQuoterConfig(cfg: *const CQuoterConfig) types.QuoterConfig {
         .mode = switch (cfg.mode) {
             1 => .gueant_asymptotic,
             2 => .gueant_ode,
+            3 => .option_vega,
             else => .as_finite_horizon,
         },
     };
@@ -743,7 +744,84 @@ export fn jev_omm_gueant_ode_offsets(
     out_delta_a.* = o.delta_a;
 }
 
+export fn jev_omm_option_mm_premiums(
+    mid: f64,
+    portfolio_vega: f64,
+    contract_vega: f64,
+    gamma: f64,
+    xi: f64,
+    A: f64,
+    kappa: f64,
+    vega_limit: f64,
+    horizon: f64,
+    grid_n: i32,
+    n_steps: i32,
+    vol_edge: f64,
+    rho: f64,
+    iv_alpha: f64,
+    intensity_kind: i32,
+    lambda0: f64,
+    alpha: f64,
+    beta: f64,
+    out_delta_b: *f64,
+    out_delta_a: *f64,
+    out_bid_size: *i32,
+    out_ask_size: *i32,
+    out_reservation: *f64,
+) callconv(.c) void {
+    const omm = @import("option_mm.zig");
+    const cfg = omm.OptionMmConfig{
+        .gamma = gamma,
+        .xi = xi,
+        .A = A,
+        .kappa = kappa,
+        .vega_limit = vega_limit,
+        .horizon = horizon,
+        .grid_n = if (grid_n > 0) @intCast(grid_n) else 31,
+        .n_steps = if (n_steps > 0) @intCast(n_steps) else 60,
+        .vol_edge = vol_edge,
+        .rho = rho,
+        .iv_alpha = iv_alpha,
+        .intensity = if (intensity_kind == 1) .logistic else .exponential,
+        .lambda0 = lambda0,
+        .alpha = alpha,
+        .beta = beta,
+        .min_premium = 0.0,
+        .max_premium = 1e6,
+    };
+    const q = omm.solveAndQuote(&cfg, mid, portfolio_vega, contract_vega, 1.0, 1.0);
+    out_delta_b.* = q.delta_b;
+    out_delta_a.* = q.delta_a;
+    out_bid_size.* = q.bid_size;
+    out_ask_size.* = q.ask_size;
+    out_reservation.* = q.reservation;
+}
+
+export fn jev_omm_spot_vol_hedge(
+    net_delta: f64,
+    rho: f64,
+    xi: f64,
+    portfolio_vega: f64,
+    variance: f64,
+    spot: f64,
+) callconv(.c) f64 {
+    return hedge.spotVolHedgeQty(net_delta, rho, xi, portfolio_vega, variance, spot);
+}
+
+export fn jev_omm_hawkes_intensity(
+    mu: f64,
+    alpha: f64,
+    beta: f64,
+    t: f64,
+    n_events: i32,
+    events: [*]const f64,
+) callconv(.c) f64 {
+    const hawkes = @import("hawkes.zig");
+    const n: usize = if (n_events > 0) @intCast(n_events) else 0;
+    return hawkes.intensity(.{ .mu = mu, .alpha = alpha, .beta = beta }, t, events[0..n]);
+}
+
 export fn jev_omm_version() callconv(.c) [*:0]const u8 {
-    return "0.4.0-zig-frontiers-1-4";
+    return "0.5.0-zig-oom-citadel-lit";
 }
 

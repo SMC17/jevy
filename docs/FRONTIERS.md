@@ -1,6 +1,7 @@
-# Frontiers 1–4 — surface, term risk, queue fills, Guéant ODE
+# Frontiers — surface, term risk, queue fills, Guéant ODE, then training and option-vega MM
 
-**Version:** `0.4.0-zig-frontiers-1-4` (`jev_omm_version`)  
+**Version:** `0.5.0-zig-oom-citadel-lit` (`jev_omm_version`)  
+Frontiers 1–4 below shipped in `0.4.0-zig-frontiers-1-4` and stay as specified. Frontiers 5–8 are the `0.5.0` layer.  
 **Mode:** simulation / paper only. No live exchange SDKs, brokers, or venue keys.  
 **Decision layer:** TypeSafe System One / Jev stays in Python (`decisions/`). It returns Choice / Score / Noul answers. It does not emit orders. A live `TYPESAFE_API_KEY` is optional and is **not** required to build, test, or run these demos — missing key uses `DeterministicFallbackClient`.
 
@@ -216,10 +217,58 @@ pytest -q
 
 ---
 
+## 5. Citadel-style training desk
+
+**Code:** `jev_omm/training/`, `zig/src/training.zig`, `zig build training`, `python -m jev_omm.demo_training`.  
+**Write-up:** [TRAINING_CASES.md](./TRAINING_CASES.md).
+
+Five paper cases (`location_arb`, `etf_ap_arb`, `liability_facilitator`, `mm_inventory`, `vol_surface_mm`). Each has a role, an information set, constraints, and a score: absolute PnL, relative PnL versus the naive policy, inventory-path penalty, unhedged-beta penalty, execution penalty. JSONL replay recomputes the score from stored paths.
+
+`etf_ap_arb` asks the offline Decision client for `size_tier`. A near-risk-free flag returns Choice `large`. Policy may still cut `size_mult` on a low confidence Score. The case engine keeps max size. The model does not emit an order. No `TYPESAFE_API_KEY`.
+
+## 6. Option-inventory market making
+
+**Code:** `zig/src/option_mm.zig`, `jev_omm/quoter/option_mm.py`.  
+**Mode:** `QuoterConfig.mode = "option_vega"` (C ABI mode `3`).  
+**Cite:** Baldacci, Bergault, Guéant, https://arxiv.org/abs/1907.12433. Stoikov–Sağlam Theorem 4, https://doi.org/10.1007/s11147-009-9036-3. Lucic–Tse IV edge, https://ssrn.com/abstract=4729290.
+
+Constant-vega state \(V^\pi\). Explicit Euler grid for the mean-variance value. Premiums from the Hamiltonian of an exponential or logistic intensity. Sides that would leave \(|V^\pi|\le\overline{\mathcal{V}}\) quote size zero. `vol_edge` is \((a_\mathbb{P}-a_\mathbb{Q})/(2\sqrt{\nu})\). `iv_alpha` shifts the reservation by contract vega times (theo IV − market IV). Spot–vol hedge in `hedge.spotVolHedgeQty`:
+
+\[
+q^{S*}=-\Delta-\frac{\rho\xi V^\pi}{2\sqrt{\nu}\,S}.
+\]
+
+Cash A–S, Guéant asymptotic, and Guéant ODE are unchanged when `mode` is not `option_vega`.
+
+The unit-test toy is a small grid (`γ=0.5`, `ξ=1`, `A=40`, `k=2`, `V̄=40`, 31×60). It is not the euro-notional Baldacci §4 example.
+
+## 7. Hawkes flow and deeper queue value
+
+**Code:** `zig/src/hawkes.zig`, `jev_omm/flow/hawkes.py`.  
+**Cite:** Hawkes 1971, https://doi.org/10.1093/biomet/58.1.83; Bacry–Mastromatteo–Muzy, https://arxiv.org/abs/1502.04592.
+
+\(\lambda(t)=\mu+\sum\alpha e^{-\beta(t-t_i)}\). Excitation \((\lambda-\mu)/\mu\) is copied onto Decision `flow.hawkes_excitation` and raises the fallback toxicity Score. `fillIntensity` scales a baseline Poisson rate. It does not route orders.
+
+`queueValue` in `lob.zig` is fills × (spread capture − adverse cost). `depthAhead` sums size in front of our level on a small multi-level book. The single-order fluid model from frontier 3 is unchanged.
+
+## 8. Local vol, rough paths, variance swaps (research)
+
+**Code:** `jev_omm/surface/dupire.py`, `jev_omm/surface/rough_vol.py`, `jev_omm/pricing/varswap.py`, `zig/src/varswap.zig`.
+
+- Dupire local variance from total variance \(w(k,T)\), and a finite-difference check on flat Black calls. A flat smile returns \(\sigma_{\mathrm{loc}}=\sigma\). Python only.
+- Fractional-Brownian covariance and a one-factor rough Bergomi variance path for stress sims ([arXiv:1410.3394](https://arxiv.org/abs/1410.3394)). Not a quoter.
+- Variance-strike replication \(K_{\mathrm{var}}=(2/T)\int\mathrm{OTM}/K^2\,dK\) and the sqrt convexity adjustment for a vol swap. Stylized vega \(2\sigma\).
+
+Details and links: [LITERATURE_CANON.md](./LITERATURE_CANON.md).
+
 ## Still later
 
 - Live `TYPESAFE_API_KEY` / pinning `jev-1.x` (hooks exist; fallback is the default).
 - Historical OPRA/LOB replay instead of the synthetic queue.
-- Full no-arbitrage SVI calibration with cross-expiry joint SSVI (shared \(\rho,\eta,\gamma\), per-expiry \(\theta\) is evaluated; joint MLE across expiries is not).
-- American, local vol, Heston.
+- Full no-arbitrage SVI calibration with cross-expiry joint SSVI (joint MLE across expiries is not).
+- The Baldacci §4 euro grid (20 strikes × 4 expiries, \(\overline{\mathcal{V}}=10^7\)) as a production lookup. The HJB here is a small research grid; `solveGrid` accepts several contract vegas, the quoter wrapper prices one name.
+- Multi-agent peer market makers (the MM case is a synthetic wave plus cancel latency).
+- Full Bergomi forward-variance curve, Heston PDE, American exercise.
+- Charm / color hedge bands beyond the spot–vol tilt. Vanna and volga already live on the term book.
+- Two-name dispersion.
 - Any live order path. Out of scope.
