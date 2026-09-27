@@ -60,7 +60,8 @@ Status legend: **done** (pre-existing) · **landed this PR** · **future**
 | Multi-expiry vega / vanna / volga | **landed** | `term_book.zig` |
 | Queue-aware LOB fills | **landed** | `lob.zig` (synthetic) |
 | Queue value / depth ahead | **landed** | `queueValue`, `depthAhead` in `lob.zig`; `execution/lob.py` |
-| Citadel-style training cases | **landed** | `jev_omm/training/`, `zig/src/training.zig`, [TRAINING_CASES.md](./TRAINING_CASES.md) |
+| Citadel-style training cases | **landed** | `jev_omm/training/`, `zig/src/training.zig`, [TRAINING_CASES.md](./TRAINING_CASES.md) — location residual beta, fair-value book, ETF size, liability slices, disciplined MM vs predatory research mode, SVI strip |
+| Chicago MM ecosystem | cited only | [r/quant `hekivya`](https://www.reddit.com/r/quant/comments/pwzknt/small_prop_trading_firms_in_chicago/hekivya/) is firm-list career advice. Desk-culture background only. This repo does not build features around those names. |
 | Option-vega inventory MM | **landed** | `option_mm.zig`, `quoter/option_mm.py`, mode `option_vega` |
 | Spot–vol hedge tilt | **landed** | `hedge.spotVolHedgeQty` / `hedge/delta.py` |
 | Hawkes toxic-burst intensity | **landed** | `hawkes.zig`, `flow/hawkes.py` → Decision `flow.hawkes_*` |

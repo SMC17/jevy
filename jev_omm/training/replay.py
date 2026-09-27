@@ -63,10 +63,12 @@ def replay_scores(path: str | Path) -> list[dict]:
         name = rec["case"]
         if name == "location_arb":
             inv_lambda, beta_lambda = 0.01, 2.0
+        elif name == "pm_fair_value":
+            inv_lambda, beta_lambda = 0.02, 1.5
         elif name == "liability_facilitator":
             inv_lambda = 0.05
         elif name == "mm_inventory":
-            inv_lambda = 0.02
+            inv_lambda = 0.08
         sc = score_path(
             rec["absolute_pnl"],
             rec["inventory_path"],

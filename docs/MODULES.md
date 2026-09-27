@@ -119,7 +119,7 @@ Greek P&L explain landed in `hedge.greekPnlStep` / event-log `GreekPnl` + `Hedge
 
 ## `training/`
 
-Citadel-style paper cases. See [TRAINING_CASES.md](./TRAINING_CASES.md). Zig twin: `zig/src/training.zig`, `zig build training`.
+Citadel-style paper cases (`location_arb`, `pm_fair_value`, `etf_ap_arb`, `liability_facilitator`, `mm_inventory`, `vol_surface_mm`). See [TRAINING_CASES.md](./TRAINING_CASES.md). Zig twin: `zig/src/training.zig`, `zig build training`. Default grade is the `desk` policy. `mm_inventory` also exposes an ungraded `predatory` research mode.
 
 ## `surface/dupire.py`, `surface/rough_vol.py`, `pricing/varswap.py`
 

@@ -30,7 +30,7 @@ zig build demo                      # pure-Zig paper sim (+ JSONL event log)
 zig build demo -- --multi-strike --gueant   # 5-strike strip + Guéant asymptotics
 zig build demo -- --hedge-scenario          # parity/box + banded hedge + greek PnL + scenarios
 zig build frontiers                         # SVI, multi-expiry term risk, LOB, Guéant ODE
-zig build training                          # five Citadel-style paper cases
+zig build training                          # Citadel-style paper cases
 zig build replay -- jev_omm_events.jsonl   # recompute markout/PnL from log
 zig build -Doptimize=ReleaseFast    # libjev_omm.so + demo + bench bins
 zig build bench -Doptimize=ReleaseFast

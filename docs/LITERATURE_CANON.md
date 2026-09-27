@@ -8,10 +8,11 @@ Map: citation → module → test. Simulation / paper only.
 
 | Source | Module | Test |
 | --- | --- | --- |
-| [Reddit r/Trading, Citadel training software](https://www.reddit.com/r/Trading/comments/122y2zq/what_i_learned_from_citadels_training_software/) | `jev_omm/training/`, `zig/src/training.zig` | `tests/test_training.py` |
-| [Reddit r/options mirror](https://www.reddit.com/r/options/comments/122pz4e/what_i_learned_from_citadels_training_software/) | same | same |
+| [Predicting Alpha — What I learned from Citadel's Training Software](https://www.predictingalpha.com/blogs/what-i-learned-from-citadels-training-software) (Sean Ryan, 17 Mar 2023). The `/p/` path on that host 404s; use `/blogs/`. | `jev_omm/training/`, `zig/src/training.zig` | `tests/test_training.py` |
+| [Reddit r/Trading](https://www.reddit.com/r/Trading/comments/122y2zq/what_i_learned_from_citadels_training_software/) | same | same |
+| [Reddit r/options](https://www.reddit.com/r/options/comments/122pz4e/what_i_learned_from_citadels_training_software/) | same | same |
 | [Medium / DataDrivenInvestor mirror](https://medium.datadriveninvestor.com/this-is-what-citadels-training-software-taught-me-741c3996a5b5) | same | same |
-| [r/quant Chicago prop thread](https://www.reddit.com/r/quant/comments/pwzknt/small_prop_trading_firms_in_chicago/hekivya/) | `docs/AKUNA_AND_DESK_CURRICULUM.md` | — |
+| [r/quant Chicago prop thread](https://www.reddit.com/r/quant/comments/pwzknt/small_prop_trading_firms_in_chicago/hekivya/) | curriculum note only — desk culture / Chicago MM ecosystem. Not a case and not a firm directory. | — |
 
 Case-by-case lesson map: [TRAINING_CASES.md](./TRAINING_CASES.md).
 

@@ -222,7 +222,9 @@ pytest -q
 **Code:** `jev_omm/training/`, `zig/src/training.zig`, `zig build training`, `python -m jev_omm.demo_training`.  
 **Write-up:** [TRAINING_CASES.md](./TRAINING_CASES.md).
 
-Five paper cases (`location_arb`, `etf_ap_arb`, `liability_facilitator`, `mm_inventory`, `vol_surface_mm`). Each has a role, an information set, constraints, and a score: absolute PnL, relative PnL versus the naive policy, inventory-path penalty, unhedged-beta penalty, execution penalty. JSONL replay recomputes the score from stored paths.
+Six paper cases (`location_arb`, `pm_fair_value`, `etf_ap_arb`, `liability_facilitator`, `mm_inventory`, `vol_surface_mm`). Each has a role, an information set, constraints, and a score: absolute PnL, relative PnL versus the naive policy, inventory-path penalty, unhedged-beta penalty, execution penalty. JSONL replay recomputes the score from stored paths.
+
+`location_arb` cannot hedge inside the sim (no futures). The desk path is an out-of-sim futures overlay whose true beta is 0.85, so basis risk remains. `pm_fair_value` longs cheap names and forces a market-neutral opposing leg. `liability_facilitator` takes a forced client block and works it in slices (algo gap 1 vs hand gap 12) while skipping discretionary adds. `mm_inventory` tags `forced` vs `discretionary` flow. The graded policy widens and skews. A `predatory` research mode joins the wave and sells into peer covering; it is not the default grade.
 
 `etf_ap_arb` asks the offline Decision client for `size_tier`. A near-risk-free flag returns Choice `large`. Policy may still cut `size_mult` on a low confidence Score. The case engine keeps max size. The model does not emit an order. No `TYPESAFE_API_KEY`.
 

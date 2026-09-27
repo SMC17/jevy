@@ -1,4 +1,4 @@
-"""Paper demo of the five training cases plus a small option-vega quote.
+"""Paper demo of the training cases plus a small option-vega quote.
 
     python -m jev_omm.demo_training
 """
