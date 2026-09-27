@@ -1,4 +1,4 @@
-"""Five paper cases. Same constants and LCG as ``zig/src/training.zig``.
+"""Paper cases. Same constants and LCG as ``zig/src/training.zig``.
 
 Strategies are code. A Decision snapshot (Choice / Score / Noul from the
 offline fallback) may scale size. It does not contain an order.
@@ -20,6 +20,7 @@ from jev_omm.training.scoring import SPECS, CaseRun, lcg_next, score_path
 
 CASES = (
     "location_arb",
+    "pm_fair_value",
     "etf_ap_arb",
     "liability_facilitator",
     "mm_inventory",
@@ -28,52 +29,132 @@ CASES = (
 
 
 def _location(strategy: str, peer_pnl: float) -> tuple[CaseRun, list[float], list[float]]:
+    """Location spread. The original sim has no futures.
+
+    Venue A moves one-for-one with the factor. Venue B moves with beta 0.55
+    plus the transport basis, so a matched long/short is not factor-flat.
+    The desk policy is the author's real-life comment, not a sim instrument:
+    hedge with futures as if their beta were 1, while the future's true beta
+    is 0.85. The gap is basis risk. A negative factor drift is the oil-down
+    scenario in the write-up.
+    """
     n = 40
     state = 7
     f = 100.0
     basis = 0.80
+    fut_basis = 0.12
     qa = qb = qf = cash = 0.0
     inv: list[float] = []
     beta: list[float] = []
-    beta_a, beta_b, qty = 1.0, 0.55, 2.0
-    events: list[dict] = []
+    fut_beta = 0.85
     for _t in range(n):
-        a = f
-        b = f + basis
-        edge = b - a
-        traded = 0.0
-        if abs(edge) > 0.20:
-            traded = qty if edge > 0.0 else -qty
-            if edge > 0.0:
-                cash -= qty * a
-                cash += qty * b
+        pa = f
+        pb = 100.0 + 0.55 * (f - 100.0) + basis
+        pf = 100.0 + fut_beta * (f - 100.0) + fut_basis
+        if abs(basis) > 0.20:
+            qty = 2.0
+            if basis > 0.0:
+                cash -= qty * pa
+                cash += qty * pb
                 qa += qty
                 qb -= qty
             else:
-                cash += qty * a
-                cash -= qty * b
+                cash += qty * pa
+                cash -= qty * pb
                 qa -= qty
                 qb += qty
-        net = beta_a * qa + beta_b * qb
-        hedged = 0.0
+        oil = qa + 0.55 * qb
         if strategy == "desk":
-            target = -net
+            target = -oil
             dq = target - qf
-            cash -= dq * f
+            cash -= dq * pf
             qf = target
-            hedged = dq
-            net = beta_a * qa + beta_b * qb + qf
+            net = oil + fut_beta * qf
+        else:
+            net = oil
         inv.append(abs(qa) + abs(qb))
         beta.append(net)
-        events.append({"type": "Step", "factor": f, "basis": basis, "traded": traded, "hedge_dq": hedged, "beta": net})
         state, z = lcg_next(state)
-        f += 1.5 * z
+        f += -0.25 + 1.5 * z
         state, z2 = lcg_next(state)
         basis = 0.92 * basis + 0.06 + 0.02 * z2
-    pnl = cash + qa * f + qb * (f + basis) + qf * f
+        state, z3 = lcg_next(state)
+        fut_basis = 0.80 * fut_basis + 0.05 * z3
+    pa = f
+    pb = 100.0 + 0.55 * (f - 100.0) + basis
+    pf = 100.0 + fut_beta * (f - 100.0) + fut_basis
+    pnl = cash + qa * pa + qb * pb + qf * pf
     sc = score_path(pnl, inv, beta, inv_lambda=0.01, beta_lambda=2.0, peer_pnl=peer_pnl)
+    events = [
+        {
+            "type": "HedgeConstraint",
+            "futures_in_sim": False,
+            "hedge": "none" if strategy != "desk" else "irl_futures_basis",
+            "futures_beta": fut_beta,
+            "residual_beta": beta[-1] if beta else 0.0,
+            "note": (
+                "Original simulator: cannot short spot oil, and futures were not in the sim. "
+                "The desk book is an out-of-sim futures overlay. True futures beta is 0.85, "
+                "so a one-for-one hedge leaves residual basis risk."
+            ),
+        }
+    ]
     run = CaseRun(SPECS["location_arb"], strategy, sc, inv, beta, events)
     return run, inv, beta
+
+
+def _pm(strategy: str, peer_pnl: float) -> CaseRun:
+    """Three names with known fair values. Desk forces net beta to zero."""
+    n = 36
+    state = 31
+    fair = [100.0, 100.0, 100.0]
+    price = [96.5, 99.4, 102.8]
+    q = [0.0, 0.0, 0.0]
+    cash = 0.0
+    inv: list[float] = []
+    beta: list[float] = []
+    fair_edge: list[float] = []
+    for _t in range(n):
+        gap = [fair[i] - price[i] for i in range(3)]
+        target = [0.0, 0.0, 0.0]
+        if strategy != "desk":
+            for i in range(3):
+                if gap[i] > 0.40:
+                    target[i] = 1.0
+        else:
+            for i in range(3):
+                if gap[i] > 0.40:
+                    target[i] = 2.0
+                elif gap[i] < -0.40:
+                    target[i] = -2.0
+            net = sum(target)
+            j = min(range(3), key=lambda i: (abs(gap[i]), i))
+            target[j] -= net
+        for i in range(3):
+            dq = target[i] - q[i]
+            cash -= dq * price[i]
+            q[i] = target[i]
+        inv.append(sum(abs(x) for x in q))
+        beta.append(sum(q))
+        fair_edge.append(sum(q[i] * gap[i] for i in range(3)))
+        state, z = lcg_next(state)
+        factor = 1.2 * z
+        for i in range(3):
+            state, zi = lcg_next(state)
+            price[i] = price[i] + 0.30 * (fair[i] - price[i]) + factor + 0.04 * zi
+    pnl = cash + sum(q[i] * price[i] for i in range(3))
+    sc = score_path(pnl, inv, beta, inv_lambda=0.02, beta_lambda=1.5, peer_pnl=peer_pnl)
+    events = [
+        {
+            "type": "FairValueBook",
+            "names": 3,
+            "terminal_fair_edge": fair_edge[-1] if fair_edge else 0.0,
+            "mean_fair_edge": sum(fair_edge) / len(fair_edge),
+            "mean_abs_beta": sc.mean_abs_beta,
+            "note": "Opposing leg zeros net beta. Fair-value distance is the edge; the factor is the penalty.",
+        }
+    ]
+    return CaseRun(SPECS["pm_fair_value"], strategy, sc, inv, beta, events)
 
 
 def _etf_path(seed: int, n: int = 17) -> list[float]:
@@ -151,64 +232,138 @@ def _etf(strategy: str, peer_pnl: float) -> CaseRun:
 
 
 def _facilitator(strategy: str, peer_pnl: float) -> CaseRun:
-    n = 50
+    """Liability block, then a TWAP-like working schedule.
+
+    Gap 1 vs gap 12 stylizes the write-up: an algo clears in a few seconds,
+    a hand schedule takes on the order of a minute and sits in the drift.
+    The client block is forced (low toxicity prior). Later prints are
+    discretionary (high toxicity prior); the desk does not add them.
+    """
+    n = 48
     state = 21
-    half, jump = 0.08, 0.28
-    inv_pos = 0.0
-    pnl = 0.0
-    recent: list[float] = []
+    block = 12.0
+    premium = 0.18
+    child = 2.0
+    gap = 1 if strategy == "desk" else 12
+    impact_k = 0.008
+    mid = 100.0
+    inv_pos = block
+    cash = -block * (mid - premium)
+    next_slice = gap
+    disc_loss = 0.0
     inv: list[float] = []
     beta = [0.0] * n
-    events: list[dict] = []
-    for _t in range(n):
+    events: list[dict] = [
+        {
+            "type": "Block",
+            "flow_class": "forced",
+            "tox_prior": 0.15,
+            "size": block,
+            "premium": premium,
+            "slice_gap": gap,
+            "note": "Forced client block. Child slices work it down. The model does not send a ticket.",
+        }
+    ]
+    for t in range(n):
+        worked = 0.0
+        if inv_pos > 1e-9 and t >= next_slice:
+            sl = child if inv_pos > child else inv_pos
+            cash += sl * mid - impact_k * sl * sl
+            inv_pos -= sl
+            next_slice = t + gap
+            worked = sl
         state, u = lcg_next(state)
-        informed = (u + 1.0) / 2.0 < 0.40
-        state, side_draw = lcg_next(state)
-        cust_buy = side_draw > 0.0
-        size = 1.0
-        if strategy == "desk":
-            window = recent[-6:]
-            tox = sum(window) / len(window) if window else 0.0
-            if abs(inv_pos) >= 4.0 or tox > 0.55:
-                size = 0.0
-        if size > 0.0:
-            inv_pos += -size if cust_buy else size
-            pnl += half * size
-            if informed:
-                pnl -= jump * size
-            recent.append(1.0 if informed else 0.0)
-        else:
-            recent.append(0.0)
+        discretionary = (u + 1.0) / 2.0 < 0.30
+        state, _side = lcg_next(state)
+        took = 0.0
+        if discretionary and strategy != "desk":
+            cash -= mid
+            inv_pos += 1.0
+            disc_loss += 0.25
+            took = 1.0
+        state, z = lcg_next(state)
+        mid += -0.012 + 0.02 * z
         inv.append(inv_pos)
-        events.append({"type": "Flow", "informed": informed, "size": size, "inventory": inv_pos})
+        if worked > 0.0 or took > 0.0:
+            events.append(
+                {
+                    "type": "Work",
+                    "t": t,
+                    "flow_class": "discretionary" if took > 0.0 else "forced",
+                    "tox_prior": 0.70 if took > 0.0 else 0.15,
+                    "slice": worked,
+                    "discretionary_take": took,
+                    "inventory": inv_pos,
+                }
+            )
+    pnl = cash + inv_pos * mid - disc_loss
     sc = score_path(pnl, inv, beta, inv_lambda=0.05, beta_lambda=0.0, peer_pnl=peer_pnl)
     return CaseRun(SPECS["liability_facilitator"], strategy, sc, inv, beta, events)
 
 
 def _mm(strategy: str, peer_pnl: float) -> CaseRun:
+    """Disciplined inventory is the grade. Predatory peer-cover is research only.
+
+    Forced flow (must-trade hedges, rebalance) has a low toxicity prior and
+    pays the spread. Discretionary flow has a high prior. The research mode
+    joins the discretionary wave and sells into the later cover; raw PnL can
+    be higher, and the inventory-path penalty keeps it off the default grade.
+    """
+    if strategy not in ("naive", "desk", "predatory"):
+        strategy = "naive"
     ahead, intensity, horizon = 4.0, 25.0, 1.0
-    lat = 0.20 if strategy == "desk" else 0.90
+    lat = 0.90 if strategy == "naive" else 0.20
     fills = expected_fills(ahead, 6.0, intensity, 0.0, horizon, lat)
-    spread, adverse = 0.05, 0.15
-    pnl = fills * spread - fills * adverse
+    queue_pnl = 0.0 if strategy == "predatory" else fills * (0.05 - 0.15)
     n = 40
+    state = 44
     inv_pos = 0.0
+    spread = 0.0
+    adverse = 0.0
     inv: list[float] = []
     beta = [0.0] * n
     for t in range(n):
-        hit = True
-        if strategy == "desk" and inv_pos >= 5.0:
-            hit = False
-        if strategy == "desk" and inv_pos >= 3.0 and t % 2 == 0:
-            hit = False
-        if hit:
+        state, u = lcg_next(state)
+        forced = (u + 1.0) / 2.0 < 0.45
+        wave = (not forced) and (t >= 8)
+        if strategy == "naive":
             inv_pos += 1.0
-            pnl += 0.04
-            if t > n // 3:
-                pnl -= 0.09
+            spread += 0.04
+            if wave:
+                adverse += 0.09
+        elif strategy == "desk":
+            if forced and abs(inv_pos) < 4.0:
+                state, side = lcg_next(state)
+                inv_pos += 1.0 if side > 0.0 else -1.0
+                spread += 0.07
+            elif abs(inv_pos) >= 4.0:
+                inv_pos += -1.0 if inv_pos > 0.0 else 1.0
+                spread += 0.03
+        else:
+            if t < 30 and not forced:
+                inv_pos += 1.0
+            elif t >= 30 and inv_pos > 0.0:
+                sold = min(inv_pos, 4.0)
+                inv_pos -= sold
+                spread += sold * 0.35
         inv.append(inv_pos)
-    sc = score_path(pnl, inv, beta, inv_lambda=0.02, beta_lambda=0.0, peer_pnl=peer_pnl)
-    events = [{"type": "LobRace", "cancel_latency": lat, "expected_fills": fills, "queue_pnl": fills * (spread - adverse)}]
+    pnl = queue_pnl + spread - adverse
+    sc = score_path(pnl, inv, beta, inv_lambda=0.08, beta_lambda=0.0, peer_pnl=peer_pnl)
+    events = [
+        {
+            "type": "LobRace",
+            "cancel_latency": lat,
+            "expected_fills": fills,
+            "queue_pnl": queue_pnl,
+            "spread_pnl": spread,
+            "flow_classes": ["forced", "discretionary"],
+            "tox_prior_forced": 0.20,
+            "tox_prior_discretionary": 0.75,
+            "policy": strategy,
+            "graded": strategy == "desk",
+            "research_mode": "predatory_peer_cover",
+        }
+    ]
     return CaseRun(SPECS["mm_inventory"], strategy, sc, inv, beta, events)
 
 
@@ -256,6 +411,8 @@ def run_case(name: str, strategy: str = "desk", peer_pnl: float = 0.0) -> CaseRu
     if name == "location_arb":
         run, _, _ = _location(strategy, peer_pnl)
         return run
+    if name == "pm_fair_value":
+        return _pm(strategy, peer_pnl)
     if name == "etf_ap_arb":
         return _etf(strategy, peer_pnl)
     if name == "liability_facilitator":
