@@ -116,6 +116,25 @@ pub fn build(b: *std.Build) void {
     frontiers_step.dependOn(&frontiers_run.step);
     frontiers_run.step.dependOn(b.getInstallStep());
 
+    // Citadel-style training cases (paper only)
+    const training = b.addExecutable(.{
+        .name = "jev_omm_training",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/demo_training.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "jev_omm", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(training);
+
+    const training_step = b.step("training", "Citadel-style paper training cases");
+    const training_run = b.addRunArtifact(training);
+    training_step.dependOn(&training_run.step);
+    training_run.step.dependOn(b.getInstallStep());
+
     // Unit tests
     const mod_tests = b.addTest(.{
         .root_module = mod,
