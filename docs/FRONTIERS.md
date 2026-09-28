@@ -1,7 +1,7 @@
 # Frontiers — surface, term risk, queue fills, Guéant ODE, then training and option-vega MM
 
-**Version:** `0.6.0-zig-flow-positioning` (`jev_omm_version`)  
-Frontiers 1–4 below shipped in `0.4.0-zig-frontiers-1-4` and stay as specified. Frontiers 5–8 are the `0.5.0` layer. Frontier 9 is the `0.6.0` flow and positioning layer.  
+**Version:** `0.7.0-zig-state-os` (`jev_omm_version`)  
+Frontiers 1–4 below shipped in `0.4.0-zig-frontiers-1-4` and stay as specified. Frontiers 5–8 are the `0.5.0` layer. Frontier 9 is the `0.6.0` flow and positioning layer. Frontier 10 is the `0.7.0` latent-state layer.  
 **Mode:** simulation / paper only. No live exchange SDKs, brokers, or venue keys.  
 **Decision layer:** TypeSafe System One / Jev stays in Python (`decisions/`). It returns Choice / Score / Noul answers. It does not emit orders. A live `TYPESAFE_API_KEY` is optional and is **not** required to build, test, or run these demos — missing key uses `DeterministicFallbackClient`.
 
@@ -285,6 +285,18 @@ Training cases `flow_vpin`, `dealer_gamma`, and `cot_fade` grade the desk policy
 
 The public CFTC JSON endpoint is implemented and **gated** (`JEV_COT_NETWORK=1` or `allow_network=True`). Tests read `jev_omm/data/fixtures/` only. Fixture numbers are synthetic; the column names match the Socrata schema.
 
+## 10. Latent state and forced flow
+
+**Code:** `jev_omm/state_os/`, `zig/src/state_os.zig`.  
+**Write-up:** [STATE_OS.md](./STATE_OS.md).  
+**Version string:** `0.7.0-zig-state-os`.
+
+Do not forecast ΔP. Forecast the state that makes the next trade obligatory. `Instability = |F| / L_exec` gates spread, size, and hedge urgency. The gate is the identity when it is off, including when a large ratio is still sitting in the inputs.
+
+Landed and tested: LETF rebalance, net-liquidity composition, buyback blackout on caller dates, pension fixed-mix, flow-signed versus structural GEX with SPX-only ES vanna/charm, securities-lending pressure, auction imbalance, vol-control / CTA / risk-parity lookbacks, TDF 200/175, overwrite roll calendar, clock pressure, latent executable book, metaorder remaining quantity (concave impact, partial reversion, noise rejected), impact residual, constraint level-sets, hub-spoke cross-impact with the common-flow trap, funding scarcity beyond the SOFR print, time-varying Hawkes `n_t`, and warehouse terms (autocall, RILA/VA under capital regime R, MBS cusp, LDI velocity, spend, internal net, mass on the cusp).
+
+Training cases: `letf_day`, `instability_spike`, `remaining_parent`, `constraint_gate`, `gex_disagree`, `tdf_threshold`, `overwrite_roll`.
+
 ## Still later
 
 - Live `TYPESAFE_API_KEY` / pinning `jev-1.x` (hooks exist; fallback is the default).
@@ -297,3 +309,5 @@ The public CFTC JSON endpoint is implemented and **gated** (`JEV_COT_NETWORK=1` 
 - Color hedge bands. Charm and vanna are overlays on a precomputed shock, not a new band schedule. Vanna and volga already live on the term book.
 - Two-name dispersion.
 - Any live order path. Out of scope.
+- Full autocall prospectus tape, live OPRA/FINRA, a 13F parser, a live MBS coupon stack, live BoE/ESMA LDI prints, power ISOs, crypto ADL, Lazy Prices NLP, MNPI, and a bank SLR optimizer. Documented as deferred in [STATE_OS.md](./STATE_OS.md). Not stubbed as live data.
+- Live `TYPESAFE_API_KEY`. The fallback remains the default.

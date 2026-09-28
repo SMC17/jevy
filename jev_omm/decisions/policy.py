@@ -63,7 +63,7 @@ def composite_toxicity(result: SystemOneResult) -> float:
     return float(min(1.0, 0.55 * (tox / 3.0) + 0.45 * informed))
 
 
-def apply_policy(result: SystemOneResult) -> QuoteAdjustments:
+def apply_policy(result: SystemOneResult, state: Optional[dict[str, Any]] = None) -> QuoteAdjustments:
     """Map parallel System One answers → quote adjustments + flags."""
     reasons: list[str] = []
     regime, regime_conf = _choice(result, "regime", "calm")
@@ -109,6 +109,18 @@ def apply_policy(result: SystemOneResult) -> QuoteAdjustments:
     if hedge_now:
         reasons.append("hedge_now")
 
+    instability = 0.0
+    parent_remaining = 0.0
+    constraint_active = False
+    if state is not None:
+        latent = state.get("latent") or {}
+        if float(latent.get("enabled", 0.0)) >= 0.5:
+            instability = float(latent.get("instability", 0.0))
+            parent_remaining = float(latent.get("parent_remaining", 0.0))
+            constraint_active = float(latent.get("constraint_active", 0.0)) >= 0.5
+            if instability > 0.0 or parent_remaining > 0.0 or constraint_active:
+                reasons.append("latent_state")
+
     return QuoteAdjustments(
         spread_mult=float(spread_mult),
         size_mult=float(size_mult),
@@ -117,6 +129,9 @@ def apply_policy(result: SystemOneResult) -> QuoteAdjustments:
         composite_toxicity=comp,
         reason=",".join(reasons) if reasons else "neutral",
         result=result,
+        instability=instability,
+        parent_remaining=parent_remaining,
+        constraint_active=constraint_active,
     )
 
 
@@ -136,6 +151,7 @@ def decide_quote_adjustments(
     quoting_allowed: bool,
     recent_fills: int = 0,
     spot_return_bps: float = 0.0,
+    latent: Optional[dict[str, float]] = None,
 ) -> QuoteAdjustments:
     """Build state, run system_one batch, compose policy."""
     state = build_mm_state(
@@ -152,9 +168,10 @@ def decide_quote_adjustments(
         quoting_allowed=quoting_allowed,
         recent_fills=recent_fills,
         spot_return_bps=spot_return_bps,
+        latent=latent,
     )
     result = client.system_one(state, build_mm_questions())
-    return apply_policy(result)
+    return apply_policy(result, state=state)
 
 
 def default_offline_policy(**kwargs: Any) -> QuoteAdjustments:

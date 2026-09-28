@@ -884,7 +884,43 @@ export fn jev_omm_cot_fade(
     out_size.* = c.size_mult;
 }
 
+const state_os = @import("state_os.zig");
+
+pub const CStateGate = extern struct {
+    reservation_shift: f64,
+    spread_mult: f64,
+    size_mult: f64,
+    hedge_urgency: f64,
+    pull: i32,
+    instability: f64,
+};
+
+export fn jev_omm_state_gate(
+    enabled: i32,
+    instability_value: f64,
+    constraint_active: i32,
+    parent_remaining: f64,
+    f_signed: f64,
+    l_exec: f64,
+    mid: f64,
+    out: *CStateGate,
+) callconv(.c) void {
+    const g = state_os.stateGate(enabled != 0, instability_value, constraint_active != 0, parent_remaining, f_signed, l_exec, mid);
+    out.* = .{
+        .reservation_shift = g.reservation_shift,
+        .spread_mult = g.spread_mult,
+        .size_mult = g.size_mult,
+        .hedge_urgency = g.hedge_urgency,
+        .pull = if (g.pull) 1 else 0,
+        .instability = g.instability,
+    };
+}
+
+export fn jev_omm_instability(f_value: f64, l_exec: f64) callconv(.c) f64 {
+    return state_os.instability(f_value, l_exec);
+}
+
 export fn jev_omm_version() callconv(.c) [*:0]const u8 {
-    return "0.6.0-zig-flow-positioning";
+    return "0.7.0-zig-state-os";
 }
 

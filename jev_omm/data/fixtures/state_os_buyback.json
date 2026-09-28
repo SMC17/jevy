@@ -1,0 +1,7 @@
+{
+  "note": "Synthetic issuer window. Dates are not a live earnings calendar.",
+  "names": [
+    {"ticker": "SYN1", "pace": 12.0, "quarter_end": "2024-06-30", "earnings": "2024-07-18"},
+    {"ticker": "SYN2", "pace": 4.0, "quarter_end": "2024-06-30", "earnings": "2024-07-25"}
+  ]
+}
