@@ -118,9 +118,20 @@ def apply_features(
     basis_z: float = 0.0,
     rr_stress_value: float = 0.0,
     put_call_oi: float = 0.0,
+    state_enabled: bool = False,
+    instability: float = 0.0,
+    constraint_active: bool = False,
+    parent_remaining: float = 0.0,
+    f_signed: float = 0.0,
+    l_exec: float = 0.0,
 ) -> PositioningAdjust:
-    """Compose flow, GEX, COT, basis, skew, and put/call ratio. Defaults are identity."""
+    """Compose flow, GEX, COT, basis, skew, put/call, and the instability gate.
+
+    The state-gate arguments default to off. A disabled gate is the identity,
+    so existing callers are unchanged.
+    """
     from jev_omm.flow.signals import flow_prior
+    from jev_omm.state_os.gate import state_gate
 
     tox, flow_spread, flow_size = flow_prior(
         vpin, ofi_norm, aggr_imbalance, off_exchange_share, spoof
@@ -129,20 +140,33 @@ def apply_features(
         gex_enabled, gex_norm, pin_gap, spot_return, mid
     )
     c_shift, c_size = cot_fade(cot_enabled, cot_z, mid)
+    gate = state_gate(
+        state_enabled,
+        instability,
+        constraint_active,
+        parent_remaining,
+        f_signed,
+        l_exec,
+        mid,
+    )
     spread = (
         flow_spread
         * g_spread
         * basis_spread_mult(basis_z)
         * rr_spread_mult(rr_stress_value)
         * pcr_spread_mult(put_call_oi)
+        * gate.spread_mult
     )
-    size = flow_size * g_size * c_size
+    size = flow_size * g_size * c_size * gate.size_mult
     spread = _clamp(spread, 0.70, 3.50)
     size = _clamp(size, 0.20, 1.80)
+    if gate.pull:
+        size = 0.0
     if tox > 0.60:
         urgency = max(urgency, 0.30)
+    urgency = max(urgency, gate.hedge_urgency)
     return PositioningAdjust(
-        reservation_shift=g_shift + c_shift,
+        reservation_shift=g_shift + c_shift + gate.reservation_shift,
         spread_mult=spread,
         size_mult=size,
         hedge_band_mult=band,

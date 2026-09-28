@@ -10,11 +10,12 @@ Zig hot path (pricing, quoters, risk, fills, surface, hedge, event log) plus a P
 
 | Layer | Language | Role |
 | --- | --- | --- |
-| **Hot path** | **Zig 0.16** (`zig/`) | BS + vanna/volga, A–S, Guéant asymptotic **and ODE**, **constant-vega option MM**, SVI/SSVI, multi-expiry term risk, Poisson **and queue** fills, Hawkes intensity, **flow prior / dealer-gamma / COT scalers**, training kernels, hedge (including spot–vol tilt), event log — C ABI `.so` for Python (`0.6.0-zig-flow-positioning`) |
-| **Research glue** | Python (`jev_omm/`) | Config, TypeSafe System One / Jev decisions (Choice/Score/Noul only), surface/quoter mirrors, Citadel-style training desk, COT / GEX / ETF feature builders, Dupire / rough-vol research, demos, tests |
-| **Abandoned** | `_abandoned_rust/` | Early Rust spike — do not build; Zig is the chosen hot path |
+| **Hot path** | **Zig 0.16** (`zig/`) | BS + vanna/volga, A–S, Guéant asymptotic **and ODE**, **constant-vega option MM**, SVI/SSVI, multi-expiry term risk, Poisson **and queue** fills, Hawkes intensity, **flow prior / dealer-gamma / COT scalers**, **instability gate** (identity when off), training kernels, hedge (including spot–vol tilt), event log — C ABI `.so` for Python (`0.7.0-zig-state-os`) |
+| **Research glue** | Python (`jev_omm/`) | Config, TypeSafe System One / Jev decisions (Choice/Score/Noul only), latent-state engines, surface/quoter mirrors, training desk, COT / GEX / ETF feature builders, Dupire / rough-vol research, demos, tests |
 
 Classical **A–S reservation price stays pure math**. Jev answers only feed `policy.py` → `QuoteAdjustments`.
+
+The `0.7.0` layer is a latent-state desk: predict the state that makes the next trade obligatory, then gate quotes with `Instability = |F| / L_exec`. See [`docs/STATE_OS.md`](docs/STATE_OS.md). Zig and Python only.
 
 ## Quick start — Zig
 
@@ -114,11 +115,12 @@ zig build replay -- jev_omm_events.jsonl # deterministic markout/PnL recompute
 | `flow_signals.zig` | Lee–Ready, OFI, layered-cancel score, flow prior (identity at zero) |
 | `positioning.zig` | GEX / COT / basis scalers, dollar gamma, charm–vanna hedge overlay |
 | `varswap.zig` | Variance-strike trapezoid + stylized variance/vol-swap greeks |
-| `training.zig` | Shared LCG + paper training cases, including flow, dealer gamma, and COT |
+| `training.zig` | Shared LCG + paper training cases, including flow, dealer gamma, COT, and the state-OS cases |
 | `surface.zig` | Hagan SABR-lite IV (kept; SVI is the primary research surface) |
 | `markout.zig` | Spread / markout / inventory attribution |
 | `pnl.zig` | Mark-to-model PnL |
-| `c_abi.zig` | Exported C ABI for Python ctypes (`0.6.0-zig-flow-positioning`) |
+| `state_os.zig` | Instability gate and the training-case formulas (LETF, TDF, gen-3 cover). Identity when off |
+| `c_abi.zig` | Exported C ABI for Python ctypes (`0.7.0-zig-state-os`), including `jev_omm_state_gate` |
 | `event_log.zig` | Sequenced JSONL (+ LobAdd / LobExecute / LobCancel) + SHA-256 + replay |
 | `demo.zig` / `demo_frontiers.zig` / `demo_training.zig` / `replay.zig` / `bench.zig` | Paper demos, training desk, log replay, microbenchmarks |
 
@@ -131,6 +133,7 @@ zig build replay -- jev_omm_events.jsonl # deterministic markout/PnL recompute
 | `hedge/` | Banded delta hedge + greek PnL + spot–vol tilt (Zig preferred) |
 | `flow/` | Research-grade toxicity, Hawkes, Lee–Ready / OFI / spoof score → Decision state |
 | `positioning/` | COT, dealer gamma, ETF create/redeem, futures roll, factor overlay |
+| `state_os/` | S_t, instability gate, forced-flow engines, research cores, warehouse terms |
 | `data/fixtures/` | Synthetic CFTC-shaped CSV. Live Socrata fetch is gated |
 | `pnl/` | Mark PnL + markout attribution |
 | `quoter/` | A–S / Guéant asymptotic / **Guéant ODE** / **option-vega** / multi-strike |
@@ -141,7 +144,7 @@ zig build replay -- jev_omm_events.jsonl # deterministic markout/PnL recompute
 | `execution/` / `backtest/` | Poisson fills + **queue/LOB** sim |
 | `demo.py` / `demo_desk.py` / `demo_frontiers.py` / `demo_training.py` | Paper demos, including the training cases |
 
-Docs: [`docs/FRONTIERS.md`](docs/FRONTIERS.md) (frontiers 1–8) · [`docs/TRAINING_CASES.md`](docs/TRAINING_CASES.md) · [`docs/LITERATURE_CANON.md`](docs/LITERATURE_CANON.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/PERF.md`](docs/PERF.md) · [`docs/MODULES.md`](docs/MODULES.md) · [`docs/AKUNA_AND_DESK_CURRICULUM.md`](docs/AKUNA_AND_DESK_CURRICULUM.md)
+Docs: [`docs/STATE_OS.md`](docs/STATE_OS.md) · [`docs/FRONTIERS.md`](docs/FRONTIERS.md) · [`docs/TRAINING_CASES.md`](docs/TRAINING_CASES.md) · [`docs/LITERATURE_CANON.md`](docs/LITERATURE_CANON.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/PERF.md`](docs/PERF.md) · [`docs/MODULES.md`](docs/MODULES.md) · [`docs/AKUNA_AND_DESK_CURRICULUM.md`](docs/AKUNA_AND_DESK_CURRICULUM.md)
 
 ## License
 
