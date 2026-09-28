@@ -95,9 +95,9 @@ def refuse_live(spec: str) -> None:
     low = spec.strip().lower()
     if any(mark in low for mark in LIVE_MARKERS):
         raise RuntimeError(
-            "Live OPRA/NBBO streaming is not wired. Use spec='synthetic', "
-            "a local CSV/Parquet, or the batch historical client in "
-            "jev_omm.research.databento_hist (DATABENTO_API_KEY, no live gateway)."
+            "Live OPRA/NBBO streaming is not wired. Use spec='synthetic' or a "
+            "local CSV/Parquet. The no-account sample downloader is "
+            "scripts/fetch_databento_sample.py. No API key is required."
         )
 
 

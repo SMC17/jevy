@@ -28,7 +28,7 @@ def test_osi_parses_a_padded_symbol_and_rejects_garbage():
 def test_live_urls_refused_and_local_name_is_a_file(tmp_path: Path):
     with pytest.raises(RuntimeError, match="OPRA"):
         refuse_live("opra://SPX")
-    with pytest.raises(RuntimeError, match="live"):
+    with pytest.raises(RuntimeError, match="streaming"):
         load_tape("https://live.databento.com/v0/stream")
     with pytest.raises(FileNotFoundError, match="not bundled"):
         load_tape(str(tmp_path / "databento_local.csv"))
@@ -119,9 +119,16 @@ def test_roundtrip_csv_columns(tmp_path: Path):
     assert loaded.book_state == ["two_sided"]
 
 
-def test_historical_client_does_not_spend_or_go_live(monkeypatch, tmp_path: Path):
-    monkeypatch.delenv("DATABENTO_API_KEY", raising=False)
-    with pytest.raises(DatabentoError, match="DATABENTO_API_KEY"):
+def test_keyed_historical_client_is_gated_off(monkeypatch, tmp_path: Path):
+    """A key in the environment must not place an HTTP call. The request path is untested."""
+    monkeypatch.setenv("DATABENTO_API_KEY", "db-not-a-real-key")
+    monkeypatch.delenv("DATABENTO_HISTORICAL", raising=False)
+
+    def _boom(url: str, *, auth_key: str | None = None, timeout: float = 60.0) -> bytes:
+        raise AssertionError(f"keyed client called the network: {url}")
+
+    monkeypatch.setattr("jev_omm.research.databento_hist._get", _boom)
+    with pytest.raises(DatabentoError, match="gated off"):
         fetch_historical_slice(
             dataset="OPRA.PILLAR",
             schema="cbbo-1m",
@@ -130,29 +137,10 @@ def test_historical_client_does_not_spend_or_go_live(monkeypatch, tmp_path: Path
             end="2024-01-02T15:05",
             dest_dir=tmp_path,
         )
+    # ``_get`` here is the function object imported above, not the patched
+    # module attribute. Live hosts are rejected before any socket open.
     with pytest.raises(DatabentoError, match="live"):
         _get("https://live.databento.com/v0/timeseries.get_range")
-
-    monkeypatch.setenv("DATABENTO_API_KEY", "db-not-a-real-key")
-    monkeypatch.setenv("DATABENTO_MAX_COST_USD", "0")
-
-    def _fake_get(url: str, *, auth_key: str | None = None, timeout: float = 60.0) -> bytes:
-        assert auth_key == "db-not-a-real-key"
-        assert "live.databento.com" not in url
-        if "metadata.get_cost" in url:
-            return b"1.25"
-        raise AssertionError(f"paid download was attempted: {url}")
-
-    monkeypatch.setattr("jev_omm.research.databento_hist._get", _fake_get)
-    with pytest.raises(DatabentoError, match="exceeds"):
-        fetch_historical_slice(
-            dataset="OPRA.PILLAR",
-            schema="cbbo-1m",
-            symbols="TEST",
-            start="2024-01-02T15:00",
-            end="2024-01-02T15:05",
-            dest_dir=tmp_path,
-        )
 
 
 def test_parquet_roundtrip(tmp_path: Path):

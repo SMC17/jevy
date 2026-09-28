@@ -159,7 +159,7 @@ zig build replay -- jev_omm_events.jsonl # deterministic markout/PnL recompute
 | `risk/` | Hard limits, scenario matrix, **multi-expiry term risk** |
 | `execution/` / `backtest/` | `run_simulation` fill backend: **LOB** (primary) or explicit Poisson. Hedges are booked into cash and the underlier |
 | `demo.py` / `demo_desk.py` / `demo_frontiers.py` / `demo_training.py` | Paper demos, including the training cases |
-| `research/` | Walk-forward on a local CSV/Parquet tape, Databento batch client (env key, no live gateway), adversarial multi-seed tables, numerical checks |
+| `research/` | Walk-forward on a local CSV/Parquet tape or the no-account Databento sample. Keyed historical client is gated off. Adversarial tables, numerical checks |
 | `decisions/scoreboard.py` | Paper Brier / log loss / ECE, including the simulator loop. Jev still does not emit orders |
 
 Docs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/DATA.md`](docs/DATA.md) · [`docs/ablation_real_or_fixture.md`](docs/ablation_real_or_fixture.md) · [`docs/ablation_adversarial.md`](docs/ablation_adversarial.md) · [`docs/ablation_synthetic.md`](docs/ablation_synthetic.md) · [`docs/NUMERICAL.md`](docs/NUMERICAL.md) · [`docs/JEV_SCORE.md`](docs/JEV_SCORE.md) · [`docs/PERF.md`](docs/PERF.md) · [`docs/STATE_OS.md`](docs/STATE_OS.md) · [`docs/FRONTIERS.md`](docs/FRONTIERS.md) · [`docs/TRAINING_CASES.md`](docs/TRAINING_CASES.md) · [`docs/LITERATURE_CANON.md`](docs/LITERATURE_CANON.md) · [`docs/MODULES.md`](docs/MODULES.md) · [`docs/AKUNA_AND_DESK_CURRICULUM.md`](docs/AKUNA_AND_DESK_CURRICULUM.md)
