@@ -26,13 +26,19 @@ def pack_adjustment(
     spot: float,
     strike: float,
     mid: float,
+    allow_gex: bool = True,
 ) -> PositioningAdjust | None:
-    """Return quote scalers for ``pack``, or None when the pack is off."""
+    """Return quote scalers for ``pack``, or None when the pack is off.
+
+    ``allow_gex=False`` drops the dealer-gamma scaler (identity on that
+    channel) when the tape has no underlying spot. Other channels are
+    unchanged. ``off`` is still the full identity.
+    """
     name = (pack or "off").strip().lower()
     if name in ("", "off", "none", "identity"):
         return None
     flow = name in ("flow", "flow_gex", "all", "progressive")
-    gex = name in ("gex", "flow_gex", "all", "progressive")
+    gex = allow_gex and name in ("gex", "flow_gex", "all", "progressive")
     state = name in ("state", "all", "progressive")
     if name not in ("flow", "gex", "state", "flow_gex", "all", "progressive"):
         raise ValueError(f"unknown feature_pack: {pack}")
