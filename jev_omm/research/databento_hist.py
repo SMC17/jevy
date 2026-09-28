@@ -1,10 +1,11 @@
-"""Databento batch historical client and the public sample endpoint.
+"""Databento public sample download, plus a keyed historical client that is off.
 
-No live gateway. The API key is read from ``DATABENTO_API_KEY`` and is never
-written to disk by this module. Historical pulls are refused when the
-estimated cost is above ``DATABENTO_MAX_COST_USD`` (default 0, so a key
-alone does not spend). Public sample files need no key and no account;
-they are a vendor preview, not a trading day.
+The path this tree runs is the no-account sample endpoint and local
+CSV/Parquet files. No ``DATABENTO_API_KEY`` is required or requested.
+
+``fetch_historical_slice`` is documented and gated off. It does not run
+unless ``DATABENTO_HISTORICAL=1``. Tests do not enter that function.
+A key is never written to disk. Live gateway hosts are refused.
 
 Raw bytes go to ``data/local/`` which is gitignored. Do not commit them.
 """
@@ -111,6 +112,11 @@ def fetch_public_sample(
     return path, tape, raw
 
 
+def historical_enabled() -> bool:
+    """Keyed historical calls stay off unless this is exactly ``1``."""
+    return os.environ.get("DATABENTO_HISTORICAL", "").strip() == "1"
+
+
 def api_key() -> str:
     return os.environ.get("DATABENTO_API_KEY", "").strip()
 
@@ -153,16 +159,25 @@ def fetch_historical_slice(
     stype_in: str = "raw_symbol",
     dest_dir: str | Path = "data/local",
 ) -> tuple[Path, Tape]:
-    """Bounded historical CSV via ``timeseries.get_range``. Not a live stream.
+    """Optional keyed historical CSV. Gated off. Not used by the checked-in runs.
 
-    Requires ``DATABENTO_API_KEY``. Refuses the call when
-    ``metadata.get_cost`` is above ``DATABENTO_MAX_COST_USD`` (default 0).
+    Returns only when ``DATABENTO_HISTORICAL=1`` and ``DATABENTO_API_KEY`` is
+    set, and only when ``metadata.get_cost`` is within ``DATABENTO_MAX_COST_USD``
+    (default 0). The research path does not call this. Use
+    ``fetch_public_sample`` or a local file instead.
     """
+    if not historical_enabled():
+        raise DatabentoError(
+            "Keyed Databento historical client is gated off. "
+            "This research path does not use DATABENTO_API_KEY. "
+            "Use scripts/fetch_databento_sample.py or a local CSV/Parquet. "
+            "Set DATABENTO_HISTORICAL=1 only to call hist.databento.com yourself."
+        )
     key = api_key()
     if not key:
         raise DatabentoError(
-            "DATABENTO_API_KEY is not set. Refusing to call the historical API. "
-            "The public sample endpoint does not need a key."
+            "DATABENTO_HISTORICAL=1 but DATABENTO_API_KEY is not set. "
+            "Refusing to call the historical API."
         )
     if not start or not end:
         raise DatabentoError("historical slice needs an explicit start and end")
