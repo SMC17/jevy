@@ -103,6 +103,27 @@ These are the onboarding list from the r/quant consensus in the design brief. Th
 - Guéant, *The Financial Mathematics of Market Liquidity*, CRC, 2016.
 - Moontower / Kris Abdelmessih, [implying the cost of carry](https://blog.moontower.ai/implying-the-cost-of-carry-in-options/) — parity and boxes.
 
+## Flow, positioning, dealer gamma
+
+Verified links only. Synthetic fixtures stand in for the files. No vendor pull is required.
+
+| Source | Module | Test |
+| --- | --- | --- |
+| CFTC Commitments of Traders. [Index](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm), [historical zips](https://www.cftc.gov/MarketReports/CommitmentsofTraders/HistoricalCompressed/index.htm), [TFF notes](https://www.cftc.gov/sites/default/files/idc/groups/public/@commitmentsoftraders/documents/file/tfmexplanatorynotes.pdf), [TFF field list](https://www.cftc.gov/MarketReports/CommitmentsofTraders/HistoricalViewable/cotvariablestfm.html). Socrata ids: legacy `6dca-aqww`, disaggregated `72hh-3qpy`, TFF `gpe5-46if` on `publicreporting.cftc.gov`. | `positioning/cot.py`, fixtures in `jev_omm/data/fixtures/` | `test_cot_fixtures_map_and_extreme_z_and_network_gate`, `test_training_flow_gamma_and_cot` |
+| Lee & Ready, *Inferring Trade Direction from Intraday Data*, Journal of Finance 46 (1991). [DOI 10.1111/j.1540-6261.1991.tb02683.x](https://doi.org/10.1111/j.1540-6261.1991.tb02683.x) | `flow/signals.py` `LeeReady`, `flow_signals.zig` | `test_lee_ready_ofi_and_spoof`, Zig `lee-ready quote test then tick test` |
+| Cont, Kukanov, Stoikov, *The Price Impact of Order Book Events*, Journal of Financial Econometrics 12 (2014). [DOI 10.1093/jjfinec/nbt003](https://doi.org/10.1093/jjfinec/nbt003), [arXiv:1011.6402](https://arxiv.org/abs/1011.6402) | `ofi_increment` | `test_lee_ready_ofi_and_spoof` |
+| Easley, López de Prado, O'Hara VPIN, already cited above | `flow_prior` weights the existing bucket VPIN | `test_training_flow_gamma_and_cot` |
+| Cartea, Jaimungal, Wang, *Spoofing and Price Manipulation in Order-Driven Markets*, Applied Mathematical Finance 27 (2020). [DOI 10.1080/1350486X.2020.1726783](https://doi.org/10.1080/1350486X.2020.1726783) | `spoof_score` — layered cancel fraction, not their control problem | `test_lee_ready_ofi_and_spoof` |
+| Barbon & Buraschi, *Gamma Fragility*. [SSRN 3725454](https://doi.org/10.2139/ssrn.3725454), [PDF](https://www.abarbon.com/assets/Barbon_Buraschi_2021_Gamma_Fragility.pdf) | `gex_adjust` / `gexAdjust`: short gamma widens and tightens the hedge band; long gamma leans to a pin and widens the band | `test_apply_features_identity_and_golden_numbers`, Zig `long gamma leans to the pin` |
+| Garleanu, Pedersen, Poteshman, *Demand-Based Option Pricing*, RFS 22 (2009) 4259–4299. [NBER w11843](https://doi.org/10.3386/w11843) | `short_premium` posture (dealers short the wings end users buy, especially index puts). Not a measured inventory | `test_gex_postures_flip_and_max_pain_limit` |
+| Ni, Pearson, Poteshman, *Stock Price Clustering on Option Expiration Dates*, JFE 78 (2005). [DOI 10.1016/j.jfineco.2004.08.005](https://doi.org/10.1016/j.jfineco.2004.08.005) | `pin_level` only when dealer gamma is positive | same |
+| Avellaneda & Lipkin, *A market-induced mechanism for stock pinning*, Quantitative Finance 3 (2003). [DOI 10.1088/1469-7688/3/6/301](https://doi.org/10.1088/1469-7688/3/6/301) | same pin candidate | same |
+| Max pain (holder-intrinsic minimizer) | `max_pain`. Documented limit: not a forecast. Ignored when GEX is negative | `test_gex_postures_flip_and_max_pain_limit` |
+
+Charm is a central difference of BS delta (`charm_tau` / `charmTau`, step `1e-4`). Vanna is the greek already on the BS pricer. Both enter `charm_vanna_hedge` as a hedge overlay. Zero shocks leave the hedge quantity unchanged.
+
+Put/call OI and a 25-delta risk-reversal stress are spread multipliers in `apply_features`. They are 1 when the inputs are 0. ETF create/redeem pressure and the futures-overlay quantity deepen the existing training cases; they do not change those scores.
+
 ## Decision layer
 
 TypeSafe System One / Jev: [blog](https://typesafe.ai/blog/introducing-system-one-models-and-jev), [docs](https://docs.typesafe.ai/). Choice / Score / Noul only. `DeterministicFallbackClient` is the no-key path. Tests: `tests/test_decisions_client.py`, `tests/test_decisions_policy.py`.

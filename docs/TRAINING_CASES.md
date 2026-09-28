@@ -1,6 +1,6 @@
 # Training cases — Citadel-style paper desk
 
-**Version:** `0.5.0-zig-oom-citadel-lit`  
+**Version:** `0.6.0-zig-flow-positioning`  
 **Code:** `jev_omm/training/` (research desk, JSONL, Decision hook) and `zig/src/training.zig` (same LCG and constants).  
 **Mode:** simulation / paper only. No live venues. The decision model never emits orders.
 
@@ -96,6 +96,30 @@ Tests: `test_mm_inventory_beats_the_wave`, Zig `mm default grade is the stable b
 **Lesson:** do not quote through butterfly or calendar arbitrage. Sticky-strike and sticky-delta are different marks at the same strike (Gatheral–Jacquier, https://arxiv.org/abs/1204.0646). The desk refuses the bad package. The naive book pays an arb penalty and a regime-mismatch penalty.
 
 This case is the options-desk extension. The public essay's market-making section is single-stock. Tests: `test_vol_surface_refuses_arb`. Surface math itself stays in `svi.zig` / `jev_omm/surface/svi.py`.
+
+## 7. `flow_vpin`
+
+**Role:** market maker on a signed tape.  
+**Information:** bucket VPIN, one-level order-flow imbalance, an off-exchange share, and a layered-cancel score.  
+**Lesson:** when those line up, `flow_prior` widens the quote and cuts size. The naive book keeps size 1 and spread multiplier 1 and pays the adverse move.
+
+The graded PnL is that scaler, in Python and in Zig, on the same LCG. A Decision snapshot on a toxic state returns Choice `size_tier=tiny` from the fallback client (`source=fallback`). The snapshot is not a ticket. Tests: `test_training_flow_gamma_and_cot`, Zig `flow desk quotes through toxicity and keeps more pnl`.
+
+## 8. `dealer_gamma`
+
+**Role:** options market maker in two dealer-gamma regimes.  
+**Information:** normalized GEX, a pin, and a hedge band.  
+**Lesson:** while GEX is positive the desk leans with long gamma (tighter quote, larger size, wider hedge band) and the spot mean-reverts. When GEX turns negative the desk widens, cuts size, and hedges inside a tighter band while the spot trends. The naive book never changes the band. Desk absolute PnL is positive; the naive book is negative.
+
+`short_premium` (dealers short both wings) does not produce a flip. The case passes a normalized GEX scalar; it does not pretend the sign was measured. Max pain is not used as a forecast. The short-gamma Decision snapshot sets `hedge_now` and `size_tier=tiny`. Tests: `test_training_flow_gamma_and_cot`, Zig `dealer gamma desk beats a flat band`.
+
+## 9. `cot_fade`
+
+**Role:** overlay on a weekly speculative positioning print.  
+**Information:** a z-score of net speculative futures positions.  
+**Lesson:** the next return in this case mean-reverts. The desk fades only when `|z| ≥ 1.5`. The naive book takes the sign of z, including mild prints. Extreme COT also widens the fallback quote. `cot_fade` itself moves the reservation against the crowd; that shift is code.
+
+Tests: `test_training_flow_gamma_and_cot`, Zig `cot desk fades the extreme and beats the crowd`.
 
 ## What this is not
 
