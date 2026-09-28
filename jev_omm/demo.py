@@ -24,7 +24,7 @@ def main() -> None:
     cfg = EngineConfig(
         quoter=QuoterConfig(gamma=0.12, kappa=1.5, sigma=0.45, quote_size=2),
         risk=RiskConfig(max_abs_inventory=20, max_loss=400.0),
-        sim=SimConfig(n_steps=150, seed=7, fill_intensity_base=5.0e4),
+        sim=SimConfig(n_steps=150, seed=7),
     )
     surface = SabrIVSurface(
         alpha=cfg.market.atm_iv,
@@ -51,7 +51,11 @@ def main() -> None:
     )
 
     console.print("\n[bold cyan]Jev Options MM — paper demo[/bold cyan]")
-    console.print("Simulation only. No live brokers / API keys required for fallback.\n")
+    console.print(
+        "Research laboratory. Simulation only. No live brokers. "
+        f"fill_model={result.fill_model} (LOB is the primary backend; "
+        "pass fill_model='poisson' for the touch model).\n"
+    )
     console.print(
         f"Surface: {result.surface_label}  backend={surface.backend_name()}  "
         f"atm≈{surface.atm_iv(cfg.market.spot0, cfg.market.expiry_years):.4f}"
@@ -92,7 +96,10 @@ def main() -> None:
             )
         console.print(ft)
     else:
-        console.print("[yellow]No fills this seed — try higher fill_intensity_base.[/yellow]")
+        console.print(
+            "[yellow]No fills this seed. Intensity is events/second × dt_seconds; "
+            "raise fill_intensity_per_second or lower lob_ahead.[/yellow]"
+        )
 
     if result.adjustments:
         last = result.adjustments[-1]
@@ -105,7 +112,9 @@ def main() -> None:
 
     console.print(
         f"\nFinal inventory={result.position.qty}  cash={result.position.cash:.2f}  "
-        f"marked_pnl={result.final_pnl:.2f}"
+        f"marked_pnl={result.final_pnl:.2f}  "
+        f"underlier={result.position.underlier_qty:.2f}  "
+        f"hedge_slippage={result.position.hedge_slippage:.4f}"
     )
     if result.event_log_path:
         console.print(
