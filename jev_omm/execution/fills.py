@@ -4,6 +4,11 @@ WHY: The baseline research sim posts against an exogenous Poisson flow.
 Intensity rises when our quote is closer to mid and falls when we widen.
 Bid and ask are independent. Queue position, cancel latency, and adverse
 selection live in ``lob.py`` (still synthetic — no live market data).
+
+``base_intensity`` and ``dt`` must share a unit. The simulator passes
+events per second and ``dt_seconds``. A year-fraction ``dt`` with an
+events-per-year intensity is the same product only when both are converted
+together; mixing them under-fills by ~1e5.
 """
 
 from __future__ import annotations

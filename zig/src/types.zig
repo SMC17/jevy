@@ -1,5 +1,7 @@
 //! Core domain types (plain structs, hot-path friendly).
 
+const std = @import("std");
+
 pub const Side = enum(u8) {
     bid = 0,
     ask = 1,
@@ -142,6 +144,20 @@ pub const RiskConfig = struct {
     max_abs_vega: f64 = 200.0,
     max_abs_gamma: f64 = 5.0,
     max_loss: f64 = 500.0,
+    /// <= 0 means the limit is unset (no-op).
+    max_abs_notional: f64 = 0.0,
+    max_abs_per_strike: i32 = 0,
+    max_quotes_outstanding: i32 = 0,
+};
+
+/// Optional book objects for the hard-risk gate.
+/// NaN notional, or a negative per-strike / quotes count, means the object
+/// was not supplied and that check is skipped even if the limit is set.
+pub const RiskBook = struct {
+    extra_delta: f64 = 0.0,
+    notional: f64 = std.math.nan(f64),
+    per_strike_abs: i32 = -1,
+    quotes_outstanding: i32 = -1,
 };
 
 /// Fixed-size strike strip (desk-shaped: typically 5 strikes around spot).

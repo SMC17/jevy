@@ -3,6 +3,11 @@
 Poisson touch fills in ``fills.py`` remain available. This model adds depth,
 queue position, cancel latency, partial fills, and an adverse-selection jump.
 No live market data.
+
+The stepper is unit-agnostic: ``trade_intensity`` and ``cancel_ahead`` are
+counts per unit of ``horizon``. ``run_simulation`` passes contracts per
+second and ``horizon=dt_seconds``. Standalone tests use a horizon of 1 in
+whatever unit ``trade_intensity`` was written in.
 """
 
 from __future__ import annotations
@@ -12,7 +17,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from jev_omm.models.types import Side
+from jev_omm.models.types import Fill, Quote, Side
 
 
 @dataclass
@@ -123,6 +128,60 @@ def fill_markout(
     if side == Side.BID:
         return (mid - jump - price) * size
     return (price - (mid + jump)) * size
+
+
+def sample_step_fills(
+    rng: np.random.Generator,
+    time: float,
+    mid: float,
+    quote: Quote,
+    dt_seconds: float,
+    *,
+    trade_intensity_per_second: float,
+    cancel_ahead_per_second: float = 0.0,
+    ahead: float = 0.0,
+    adverse_jump: float = 0.0,
+    toxic_flow: float = 0.0,
+    cancel_latency_seconds: float | None = None,
+) -> list[Fill]:
+    """One quote cycle of the queue model, both sides, on the seconds clock.
+
+    Each side is an independent resting order of the posted size, behind
+    ``ahead`` contracts. Filled size is the integer part of the stochastic
+    fill (the stepper's trade counts are already integral).
+    """
+    fills: list[Fill] = []
+    horizon = max(dt_seconds, 1e-6)
+    for side, price, size in (
+        (Side.BID, quote.bid, quote.bid_size),
+        (Side.ASK, quote.ask, quote.ask_size),
+    ):
+        if size <= 0:
+            continue
+        res = simulate(
+            rng,
+            LobConfig(
+                trade_intensity=trade_intensity_per_second,
+                cancel_ahead=cancel_ahead_per_second,
+                adverse_jump=adverse_jump,
+                toxic_flow=toxic_flow,
+                toxic_from=0.0,
+                dt=max(horizon / 5.0, 1e-3),
+                horizon=horizon,
+                cancel_latency=cancel_latency_seconds,
+                ahead=ahead,
+                our_size=float(size),
+                price=price,
+                mid=mid,
+                side=side,
+            ),
+        )
+        n = int(math.floor(res.filled + 1e-6))
+        if n > 0:
+            fills.append(
+                Fill(time=time, side=side, price=price, size=n, mid_at_fill=mid)
+            )
+    return fills
 
 
 def _poisson(rng: np.random.Generator, lam: float) -> int:
