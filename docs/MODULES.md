@@ -83,6 +83,21 @@ Research-grade rolling imbalance / simplified VPIN-style buckets → Decision `f
 
 Hawkes excitation (`hawkes.zig` / `flow/hawkes.py`) adds `flow.hawkes_intensity` and `flow.hawkes_excitation`. The fallback toxicity Score reads the excitation. `fill_intensity` can scale a synthetic Poisson rate.
 
+`flow/signals.py` / `flow_signals.zig` add Lee–Ready signs, one-level OFI, a synthetic off-exchange weight, and a layered-cancel score. `flow_prior` maps those plus VPIN into a spread multiplier and a size multiplier. Zeros are the identity.
+
+## `positioning/`
+
+Precomputed, paper-only features. Zig consumes scalars; it does not fetch.
+
+| Piece | Role |
+| --- | --- |
+| `cot.py` | CFTC legacy / disaggregated / TFF rows, net spec, commercial hedge ratio, trailing z, week-over-week. Fixtures under `jev_omm/data/fixtures/`. Network pull is gated |
+| `gex.py` | Dealer dollar gamma, zero-gamma level, max pain, put/call ratios, charm/vanna hedge proxy |
+| `adjust.py` / `positioning.zig` | Reservation shift, spread, size, hedge-band scale, hedge urgency. Identity when flags are off |
+| `overlays.py` | ETF create/redeem pressure, annualized futures roll, residual beta overlay |
+
+`cot_fade` fades a crowded z-score. `gex_adjust` tightens the hedge band in short gamma and widens it in long gamma. `overlay_hedge_qty` adds charm and vanna; zeros do not change the banded delta hedge.
+
 ## `execution/`
 
 Poisson fills (`fills.py`) with intensity decaying in distance-from-mid, plus a synthetic queue model (`lob.py` / `lob.zig`): depth, queue position, cancel latency, partial fills, adverse-selection markout, sequenced LobAdd / LobExecute / LobCancel.
@@ -119,7 +134,7 @@ Greek P&L explain landed in `hedge.greekPnlStep` / event-log `GreekPnl` + `Hedge
 
 ## `training/`
 
-Citadel-style paper cases (`location_arb`, `pm_fair_value`, `etf_ap_arb`, `liability_facilitator`, `mm_inventory`, `vol_surface_mm`). See [TRAINING_CASES.md](./TRAINING_CASES.md). Zig twin: `zig/src/training.zig`, `zig build training`. Default grade is the `desk` policy. `mm_inventory` also exposes an ungraded `predatory` research mode.
+Citadel-style paper cases, plus `flow_vpin`, `dealer_gamma`, and `cot_fade`. See [TRAINING_CASES.md](./TRAINING_CASES.md). Zig twin: `zig/src/training.zig`, `zig build training`. Default grade is the `desk` policy. `mm_inventory` also exposes an ungraded `predatory` research mode. The three new cases share scaler constants with Zig. Existing case scores are unchanged.
 
 ## `surface/dupire.py`, `surface/rough_vol.py`, `pricing/varswap.py`
 

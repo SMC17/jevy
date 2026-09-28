@@ -104,6 +104,17 @@ pub fn greeks(spot: f64, strike: f64, t: f64, rate: f64, div_yield: f64, iv: f64
     }
 }
 
+/// ∂Δ/∂τ, τ = time to expiry. Central difference, step 1e-4.
+/// Same definition as ``jev_omm.pricing.black_scholes.charm_tau``.
+/// A calendar year-fraction ``dt`` changes delta by ``-charmTau * dt``.
+pub fn charmTau(spot: f64, strike: f64, t: f64, rate: f64, div_yield: f64, iv: f64, is_call: bool) f64 {
+    const eps = 1e-4;
+    if (t <= 2.0 * eps or iv <= 0.0 or spot <= 0.0) return 0.0;
+    const up = greeks(spot, strike, t + eps, rate, div_yield, iv, is_call).delta;
+    const dn = greeks(spot, strike, t - eps, rate, div_yield, iv, is_call).delta;
+    return (up - dn) / (2.0 * eps);
+}
+
 pub fn priceAndGreeks(spot: f64, strike: f64, t: f64, rate: f64, div_yield: f64, iv: f64, is_call: bool) struct { price: f64, greeks: Greeks } {
     return .{
         .price = price(spot, strike, t, rate, div_yield, iv, is_call),

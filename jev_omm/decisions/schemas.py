@@ -138,6 +138,7 @@ def build_mm_state(
     toxicity_features: dict[str, float] | None = None,
     underlier_pos: float = 0.0,
     net_delta: float | None = None,
+    positioning: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Structured program state for System One (not chat text).
 
@@ -148,6 +149,7 @@ def build_mm_state(
     toxicity Score and informed_flow Noul — see ``jev_omm.flow.toxicity``.
     """
     flow = toxicity_features or {}
+    pos = positioning or {}
     return {
         "session": {"time_years": time, "quoting_allowed": quoting_allowed},
         "market": {
@@ -175,7 +177,27 @@ def build_mm_state(
             "toxicity_composite": float(flow.get("toxicity_composite", 0.0)),
             "hawkes_intensity": float(flow.get("hawkes_intensity", 0.0)),
             "hawkes_excitation": float(flow.get("hawkes_excitation", 0.0)),
+            "ofi": float(flow.get("ofi", 0.0)),
+            "aggr_imbalance": float(flow.get("aggr_imbalance", 0.0)),
+            "passive_imbalance": float(flow.get("passive_imbalance", 0.0)),
+            "off_exchange_share": float(flow.get("off_exchange_share", 0.0)),
+            "spoof": float(flow.get("spoof", 0.0)),
             "note": "research-grade toxicity features (not production VPIN)",
+        },
+        "positioning": {
+            "gex_enabled": float(pos.get("gex_enabled", 0.0)),
+            "gex_norm": float(pos.get("gex_norm", 0.0)),
+            "pin_gap": float(pos.get("pin_gap", 0.0)),
+            "dist_to_flip": float(pos.get("dist_to_flip", 0.0)),
+            "cot_z": float(pos.get("cot_z", 0.0)),
+            "cot_wow": float(pos.get("cot_wow", 0.0)),
+            "commercial_hedge_ratio": float(pos.get("commercial_hedge_ratio", 0.0)),
+            "put_call_oi": float(pos.get("put_call_oi", 0.0)),
+            "rr_25d": float(pos.get("rr_25d", 0.0)),
+            "basis_z": float(pos.get("basis_z", 0.0)),
+            "charm_hedge": float(pos.get("charm_hedge", 0.0)),
+            "vanna_hedge": float(pos.get("vanna_hedge", 0.0)),
+            "note": "precomputed features; zeros leave the fallback on the previous rules",
         },
         "policy_note": (
             "European single-series options MM sim. "
