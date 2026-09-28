@@ -44,6 +44,10 @@ def _is_gueant_ode(cfg: QuoterConfig) -> bool:
     return _mode(cfg) == "gueant_ode"
 
 
+def _is_option_vega(cfg: QuoterConfig) -> bool:
+    return _mode(cfg) == "option_vega"
+
+
 def reservation_price(
     mid: float,
     inventory: int,
@@ -52,6 +56,10 @@ def reservation_price(
     greeks: Greeks | None = None,
 ) -> float:
     """Indifference / reservation price given inventory and optional Greek tilts."""
+    if _is_option_vega(cfg):
+        from jev_omm.quoter.option_mm import make_quote as oq
+
+        return oq(mid, inventory, cfg, greeks).reservation
     if _is_gueant_ode(cfg):
         from jev_omm.quoter.gueant_ode import reservation_price as ode_r
 
@@ -75,6 +83,10 @@ def reservation_price(
 
 def optimal_half_spread(cfg: QuoterConfig, t_remaining: float | None = None) -> float:
     """A–S / Guéant optimal half-spread; clamped to [min_half_spread, max_half_spread]."""
+    if _is_option_vega(cfg):
+        from jev_omm.quoter.option_mm import make_quote as oq
+
+        return oq(1.0, 0, cfg, None).half_spread
     if _is_gueant_ode(cfg):
         from jev_omm.quoter.gueant_ode import optimal_half_spread as ode_h
 
@@ -108,6 +120,10 @@ def make_quote(
     spread_mult / size_mult come from DecisionClient (aggressiveness / widen).
     Classical A–S math is unchanged; decisions only scale the posted quote.
     """
+    if _is_option_vega(cfg):
+        from jev_omm.quoter.option_mm import make_quote as oq
+
+        return oq(mid, inventory, cfg, greeks, spread_mult=spread_mult, size_mult=size_mult)
     if _is_gueant_ode(cfg):
         from jev_omm.quoter.gueant_ode import make_quote as ode_q
 

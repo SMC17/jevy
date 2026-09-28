@@ -177,6 +177,25 @@ pub fn applyHedge(
     };
 }
 
+/// Baldacci–Bergault–Guéant appendix, arXiv 1907.12433:
+///   q^{S*} = −Δ^π − ρ ξ V^π / (2 √ν S)
+/// `variance` is the Heston variance ν (not Black vol). `portfolio_vega` is
+/// Σ q_i ∂_{√ν} O^i, which matches Black vega ∂V/∂σ when σ=√ν.
+/// Returns the target underlier position (shares), not a banded ticket.
+pub fn spotVolHedgeQty(
+    net_delta: f64,
+    rho: f64,
+    xi: f64,
+    portfolio_vega: f64,
+    variance: f64,
+    spot: f64,
+) f64 {
+    const nu = @max(variance, 1e-16);
+    const s = @max(@abs(spot), 1e-16);
+    const tilt = rho * xi * portfolio_vega / (2.0 * @sqrt(nu) * s);
+    return -net_delta - tilt;
+}
+
 /// One-step greek PnL attribution (Natenberg).
 ///
 /// Inputs are *portfolio* greeks (qty already folded in) at start of step,
@@ -293,4 +312,15 @@ test "WW band positive and increases with cost" {
 test "net delta includes underlier" {
     try std.testing.expect(@abs(netDelta(8.0, -8.0)) < 1e-12);
     try std.testing.expect(@abs(netDelta(8.0, -3.0) - 5.0) < 1e-12);
+}
+
+test "spot-vol hedge matches Baldacci appendix on the toy numbers" {
+    // qS* = -Δ - ρ ξ V / (2 √ν S)
+    // ρ=-0.5, ξ=0.2, V=10, ν=0.04, S=100, Δ=0.5
+    // tilt = -0.5*0.2*10 / (2*0.2*100) = -0.025
+    // qS = -0.5 - (-0.025) = -0.475
+    const q = spotVolHedgeQty(0.5, -0.5, 0.2, 10.0, 0.04, 100.0);
+    try std.testing.expectApproxEqAbs(q, -0.475, 1e-12);
+    const flat = spotVolHedgeQty(0.5, 0.0, 0.2, 10.0, 0.04, 100.0);
+    try std.testing.expectApproxEqAbs(flat, -0.5, 1e-12);
 }
