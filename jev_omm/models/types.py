@@ -61,6 +61,10 @@ class Position(BaseModel):
     qty: int = 0  # + long options
     avg_price: float = 0.0
     cash: float = 0.0
+    underlier_qty: float = 0.0  # shares; + long the underlying
+    # Sum of hedge slippage_cost (negative = paid). Already inside ``cash``
+    # via the hedge fill price; do not subtract it from PnL a second time.
+    hedge_slippage: float = 0.0
 
     def apply_fill(self, side: Side, price: float, size: int) -> None:
         """Update inventory and cash. Bid fill ⇒ we buy; ask fill ⇒ we sell."""

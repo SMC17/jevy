@@ -920,7 +920,54 @@ export fn jev_omm_instability(f_value: f64, l_exec: f64) callconv(.c) f64 {
     return state_os.instability(f_value, l_exec);
 }
 
+export fn jev_omm_evaluate_risk_ext(
+    inventory: i32,
+    delta_pc: f64,
+    gamma_pc: f64,
+    vega_pc: f64,
+    cash_pnl: f64,
+    max_abs_inventory: i32,
+    max_abs_delta: f64,
+    max_abs_vega: f64,
+    max_abs_gamma: f64,
+    max_loss: f64,
+    max_abs_notional: f64,
+    max_abs_per_strike: i32,
+    max_quotes_outstanding: i32,
+    extra_delta: f64,
+    notional: f64,
+    per_strike_abs: i32,
+    quotes_outstanding: i32,
+    out_allowed: *i32,
+    out_reason: *[128]u8,
+) callconv(.c) void {
+    const g = types.Greeks{ .delta = delta_pc, .gamma = gamma_pc, .vega = vega_pc, .theta = 0.0 };
+    const rcfg = types.RiskConfig{
+        .max_abs_inventory = max_abs_inventory,
+        .max_abs_delta = max_abs_delta,
+        .max_abs_vega = max_abs_vega,
+        .max_abs_gamma = max_abs_gamma,
+        .max_loss = max_loss,
+        .max_abs_notional = max_abs_notional,
+        .max_abs_per_strike = max_abs_per_strike,
+        .max_quotes_outstanding = max_quotes_outstanding,
+    };
+    const book = types.RiskBook{
+        .extra_delta = extra_delta,
+        .notional = notional,
+        .per_strike_abs = per_strike_abs,
+        .quotes_outstanding = quotes_outstanding,
+    };
+    const snap = risk.evaluateRiskBook(inventory, &g, cash_pnl, &rcfg, book);
+    out_allowed.* = if (snap.quoting_allowed) 1 else 0;
+    @memset(out_reason, 0);
+    if (snap.breach_len > 0) {
+        const n = @min(snap.breach_len, out_reason.len);
+        @memcpy(out_reason[0..n], snap.breach_reason[0..n]);
+    }
+}
+
 export fn jev_omm_version() callconv(.c) [*:0]const u8 {
-    return "0.7.0-zig-state-os";
+    return "0.8.0-zig-evidence";
 }
 
