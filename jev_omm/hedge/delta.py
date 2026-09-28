@@ -206,6 +206,18 @@ def net_delta(option_delta: float, underlier_pos: float) -> float:
     return option_delta + underlier_pos
 
 
+def book_hedge_fill(position: object, fill: HedgeFill) -> None:
+    """Apply a paper hedge to cash, underlier inventory, and slippage.
+
+    ``position`` is a ``jev_omm.models.types.Position``. Cash already embeds
+    the fill price (and therefore the slippage). ``hedge_slippage`` is the
+    attribution total, not a second PnL charge.
+    """
+    position.underlier_qty = float(position.underlier_qty) + float(fill.underlier_qty)
+    position.cash = float(position.cash) + float(fill.cash_delta)
+    position.hedge_slippage = float(position.hedge_slippage) + float(fill.slippage_cost)
+
+
 def spot_vol_hedge_qty(
     net_delta: float,
     *,

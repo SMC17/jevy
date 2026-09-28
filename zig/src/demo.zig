@@ -252,11 +252,15 @@ pub fn main(init: std.process.Init) void {
     const rng = prng.random();
 
     const n_steps: usize = 150;
-    const fill_intensity: f64 = 5.0e4;
+    // Execution clock is seconds. 0.015 events/second at the touch × 60s
+    // is O(1) expected arrivals per step before κ decay — not 5e4 × dt_years.
+    const trading_seconds_per_year: f64 = 252.0 * 6.5 * 3600.0;
+    const dt_seconds: f64 = 60.0;
+    const fill_per_second: f64 = 0.015;
     const rate: f64 = 0.05;
     const div_yield: f64 = 0.0;
     const expiry: f64 = 30.0 / 365.25;
-    const dt: f64 = 1.0 / (252.0 * 6.5 * 60.0);
+    const dt: f64 = dt_seconds / trading_seconds_per_year;
     const spot_vol: f64 = 0.20;
     const drift: f64 = 0.0;
 
@@ -340,7 +344,8 @@ pub fn main(init: std.process.Init) void {
             last_mid = atm_mid;
             tracker.onStep(@intCast(step), atm_mid);
 
-            const half0 = asq.optimalHalfSpread(&quoter, null);
+            const t_left_strip = @max(quoter.t_horizon - time, dt);
+            const half0 = asq.optimalHalfSpread(&quoter, t_left_strip);
             log.appendBookTop(time, @intCast(step), atm_mid - half0, atm_mid + half0, quoter.quote_size, quoter.quote_size, atm_mid) catch {};
 
             const marked = pnl.markedPnl(cash, port.net_inventory, atm_mid);
@@ -377,7 +382,7 @@ pub fn main(init: std.process.Init) void {
                 log.appendQuoteStrike(time, @intCast(step), out[i].strike, &out[i].quote) catch {};
                 // Sample fills per strike; apply to that strike's inventory
                 var fill_buf: [2]types.Fill = undefined;
-                const nf = fills.sampleFillsInto(rng, time, out[i].mid, &out[i].quote, dt, fill_intensity / @as(f64, @floatFromInt(@max(written, 1))), quoter.kappa, &fill_buf);
+                const nf = fills.sampleFillsInto(rng, time, out[i].mid, &out[i].quote, dt_seconds, fill_per_second / @as(f64, @floatFromInt(@max(written, 1))), quoter.kappa, &fill_buf);
                 var fi: usize = 0;
                 while (fi < nf) : (fi += 1) {
                     const f = fill_buf[fi];
@@ -413,7 +418,8 @@ pub fn main(init: std.process.Init) void {
 
             tracker.onStep(@intCast(step), opt_mid);
 
-            const half0 = asq.optimalHalfSpread(&quoter, null);
+            const t_left = @max(quoter.t_horizon - time, dt);
+            const half0 = asq.optimalHalfSpread(&quoter, t_left);
             log.appendBookTop(time, @intCast(step), opt_mid - half0, opt_mid + half0, quoter.quote_size, quoter.quote_size, opt_mid) catch {};
 
             const marked = pnl.markedPnl(cash, single_qty, opt_mid);
@@ -428,11 +434,11 @@ pub fn main(init: std.process.Init) void {
 
             log.appendDecisionSnapshot(time, @intCast(step), "fallback", "fallback-heuristic", answers_json, confidence_json) catch {};
 
-            const quote = asq.makeQuote(opt_mid, single_qty, &quoter, quoter.t_horizon, &g, 1.0, 1.0);
+            const quote = asq.makeQuote(opt_mid, single_qty, &quoter, t_left, &g, 1.0, 1.0);
             log.appendQuote(time, @intCast(step), &quote) catch {};
 
             var fill_buf: [2]types.Fill = undefined;
-            const n = fills.sampleFillsInto(rng, time, opt_mid, &quote, dt, fill_intensity, quoter.kappa, &fill_buf);
+            const n = fills.sampleFillsInto(rng, time, opt_mid, &quote, dt_seconds, fill_per_second, quoter.kappa, &fill_buf);
             var i: usize = 0;
             while (i < n) : (i += 1) {
                 const f = fill_buf[i];

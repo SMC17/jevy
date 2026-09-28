@@ -6,7 +6,24 @@
 **Command:** `cd zig && zig build bench -Doptimize=ReleaseFast`  
 **Clock:** `CLOCK_MONOTONIC`  
 **Note:** Inputs varied each iteration (volatile) to defeat dead-code elimination.  
-**Version:** `0.7.0-zig-state-os`  
+**Version of the table below:** `0.5.0` / `0.7.0` microbenchmarks, not re-run for `0.8.0-zig-evidence`.
+
+## Methodology (read this before quoting a number)
+
+These rows are single-process microbenchmarks of individual kernels. They are not a quote-to-trade latency, not a p99 of a running engine, and not comparable across machines.
+
+A future table that is allowed to be cited as a measurement needs all of the following, written next to the numbers:
+
+- CPU model, core count, and whether frequency scaling was left on
+- Zig optimize mode (`ReleaseFast` here) and the exact `zig version`
+- warm-up iterations discarded, then the timed loop
+- repeated runs (at least 5); report median and p95 of the per-run mean, not one lucky total
+- cold vs warm called out when the first invocation pays a page fault or a JIT-less first touch of a big grid
+- the bench command and the date
+
+`0.8.0` did not produce a new table. Do not invent one. The 0.7 instability gate and the 0.8 risk-book extensions are a few compares; they are not in the rows below.
+
+**Version stamp on the historical rows:** `0.7.0-zig-state-os` host note, measurements mostly from `0.5.0-zig-oom-citadel-lit` as the next paragraph says.  
 
 The rows below were measured on `0.5.0-zig-oom-citadel-lit`. The `0.6.0` flow-prior, GEX, and COT scalers, and the `0.7.0` instability gate, are unit-tested and are not in this table. The gate is a handful of multiplies on precomputed scalars. It does not reprice the book.
 
