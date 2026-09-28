@@ -78,7 +78,7 @@ MarketData ──► Surface / FairValue ──► Quoter (AS + greek penalties)
 
 ### 3.3 Quoter (AS / Guéant + greek penalties)
 - Deterministic AS **or** Guéant–Lehalle–Fernandez-Tapia (`QuoterConfig.mode`):
-  - `as_finite_horizon`: classic A–S reservation/spread with rolling horizon T−t
+  - `as_finite_horizon`: classic A–S reservation/spread with rolling session time `max(T_horizon − t, dt)`. `T_horizon` is a session length in years, not option expiry. Passing `t_remaining=None` keeps a fixed receding horizon; `run_simulation` does not do that.
   - `gueant_asymptotic`: stationary closed form (arXiv 1105.3115) with mid-touch intensity A
   - `gueant_ode`: finite-horizon ODE / principal eigenmode of the linear system, inventory cap Q
   - `option_vega`: Baldacci–Bergault–Guéant constant-vega grid (arXiv 1907.12433). Reservation and premiums are a function of portfolio vega. Cash A–S math is not used in this mode.
@@ -105,20 +105,23 @@ See [SYSTEM_ONE_JEV.md](./SYSTEM_ONE_JEV.md).
 **Forbidden:** model-emitted prices, sizes as raw strings, client order IDs, or chat rationales on the hot path.
 
 ### 3.5 Risk / Inventory
-- Hard limits: net Δ, Γ, ν, notional, per-strike caps, max quotes outstanding.
-- Soft limits feed Decision state; hard breaches force `RiskMode=flatten` regardless of nouls.
+- Hard limits that are always on: inventory, net Δ (option delta plus underlier shares), Γ, ν, loss.
+- Notional, per-strike absolute inventory, and quotes outstanding are checked only when the limit is set **and** the caller passes the object. An unset limit is a no-op.
+- Soft limits feed Decision state; hard breaches stop quoting regardless of nouls.
 - Inventory state is delta-normalized where AS uses `q`.
 
 ### 3.6 Hedge
 - Converts residual delta into underlying hedge tickets **in sim**.
+- When `hedge_now` fires and `|net delta|` exceeds the band, the fill is booked: underlier position, cash at the slipped price, cumulative slippage, and marked PnL (`cash + option_qty × option_mid + underlier_qty × spot`). A hedge that only lands in `result.hedges` is not accounting.
 - Optional spot–vol target `qS* = −Δ − ρ ξ V^π / (2 √ν S)` (Baldacci appendix). Banded delta hedge is unchanged.
-- Urgency: continuous hedge vs Decision `hedge_now` noul gate.
-- Slippage model explicit and attributed.
+- Urgency: Decision `hedge_now` noul gate. The simulator does not hedge continuously.
+- Slippage is inside the fill price (so it is inside cash). `hedge_slippage` is the attribution total and is not subtracted again.
 
 ### 3.7 Execution / Sim
-- Sequenced matching stub (price-time or simplified touch fill with queue priority).
-- Partial fills, cancels, rejects as first-class events.
-- Same event schema for historical replay and Monte Carlo.
+- `SimConfig.fill_model` selects the backend inside `run_simulation`. `lob` is the primary path (queue depth, cancel-ahead, partials, on the seconds clock). `poisson` is the explicit touch model.
+- Clocks: `dt_seconds` for fills, `dt_years = dt_seconds / (252 × 6.5 × 3600)` for GBM and Black–Scholes. `fill_intensity_per_second` is events per second at zero distance from mid. Do not multiply an events-per-year intensity by `dt_years` and call it calibrated.
+- Partial fills and cancels are first-class in the LOB stepper. The Poisson path caps size at the posted quote.
+- Same event schema for historical replay and Monte Carlo. Live OPRA/NBBO is not wired; see `docs/ablation_synthetic.md`.
 
 ### 3.8 PnL / Attribution
 - Decompose: spread capture, inventory MTM, adverse selection / markout at 1/5/30-step horizons (Zig `markout.zig` + Python `pnl/markout.py`); hedge PnL / fees later.
@@ -214,6 +217,10 @@ Optional dep: `typesafe-sdk` (never required for offline fallback tests).
 ## 6b. Latent-state gate (`0.7.0-zig-state-os`)
 
 Python builds `S_t`, forced flow, executable liquidity, constraint level-sets, and clocks (`jev_omm/state_os/`). Zig multiplies a precomputed instability scalar into spread, size, and hedge urgency (`state_os.zig`). The multiplier is 1 when the flag is off. The offline fallback maps a high ratio, a binding constraint, a live parent, or a GEX sign disagreement onto Choice / Score / Noul. Full write-up: [STATE_OS.md](./STATE_OS.md).
+
+## 6c. Evidence pass (`0.8.0-zig-evidence`)
+
+No new warehouse or engine. The simulator's primary fill path is the existing LOB stepper; Poisson is `fill_model=poisson`. Finite-horizon A–S uses rolling `T − t`. Hedges update position, cash, slippage, and marked PnL. Optional risk limits (notional, per-strike, quotes outstanding) are no-ops until set. Checked-in synthetic ablation, numerical self-checks, and a Jev paper scoreboard are under `docs/`. They are not a live track record.
 
 ## 7. Non-goals (architecture)
 

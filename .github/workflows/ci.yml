@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  zig-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig 0.16.0
+        run: |
+          curl -fL -o /tmp/zig.tar.xz https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz
+          sudo mkdir -p /opt/zig-0.16
+          sudo tar -xJf /tmp/zig.tar.xz -C /opt/zig-0.16 --strip-components=1
+          echo /opt/zig-0.16 >> "$GITHUB_PATH"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned Python dependencies and the package
+        run: |
+          python -m pip install -r requirements.lock
+          python -m pip install --no-build-isolation --no-deps -e .
+
+      - name: Zig tests
+        working-directory: zig
+        run: zig build test
+
+      - name: ReleaseFast shared library
+        working-directory: zig
+        run: |
+          zig build -Doptimize=ReleaseFast
+          cp -f zig-out/lib/libjev_omm.so ../jev_omm/native/libjev_omm.so
+
+      - name: pytest against the native library
+        env:
+          JEV_OMM_REQUIRE_NATIVE: "1"
+        run: python -m pytest -q

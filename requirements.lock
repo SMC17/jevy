@@ -1,0 +1,27 @@
+# Pinned resolved set for jevy runtime + pytest (Python 3.12).
+# Extras (typesafe, pandas output-formatting, pytest dev) are not included.
+# Regenerate from a clean env after `pip install -e ".[dev]"`.
+# CI installs from pyproject.toml (`pip install -e ".[dev]"`), builds
+# libjev_omm.so, and runs pytest with JEV_OMM_REQUIRE_NATIVE=1.
+# Local reproduction of this pin set:
+#   pip install -r requirements.lock && pip install -e . --no-deps
+annotated-types==0.8.0
+iniconfig==2.3.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
+numpy==2.4.4
+packaging==24.0
+pandas==3.0.6
+pluggy==1.6.0
+pydantic==2.13.5
+pydantic_core==2.46.5
+Pygments==2.21.0
+pytest==9.1.1
+python-dateutil==2.9.0.post0
+rich==15.0.0
+scipy==1.18.1
+setuptools==68.1.2
+six==1.16.0
+typing-inspection==0.4.4
+typing_extensions==4.15.0
+wheel==0.42.0

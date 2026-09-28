@@ -10,7 +10,9 @@ Approximation notes (READ BEFORE EXTENDING):
      risk. They do not come from A–S. They shift the reservation price so
      long gamma/vega inventory shades quotes toward selling (and vice versa).
   4. No adverse-selection / informed-flow model. No multi-strike book.
-  5. Terminal horizon T_horizon is a rolling "session" horizon, not expiry.
+  5. ``T_horizon`` is a session length in years, not option expiry. The
+     simulator passes rolling time left ``max(T_horizon − t, dt)``. Passing
+     ``t_remaining=None`` keeps a fixed receding horizon equal to ``T_horizon``.
 
 Formulas (A–S):
   reservation r = mid - q * gamma * sigma² * (T - t)

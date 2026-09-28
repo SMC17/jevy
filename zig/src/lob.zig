@@ -3,7 +3,8 @@
 //! Extends the Poisson touch model in `fills.zig`. A resting quote sits behind
 //! `ahead` contracts at its price. Two flows consume that queue:
 //!
-//!   * aggressive trades at rate `trade_intensity` (contracts / year), which
+//!   * aggressive trades at rate `trade_intensity` (contracts per unit of
+//!     `horizon`; the Python simulator passes contracts per second), which
 //!     both advance the queue and can fill us;
 //!   * cancels of size ahead of us at rate `cancel_ahead`, which advance the
 //!     queue without filling us.
