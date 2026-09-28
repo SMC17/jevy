@@ -9,6 +9,8 @@ from __future__ import annotations
 from jev_omm.decisions.client import DeterministicFallbackClient
 from jev_omm.decisions.policy import apply_policy
 from jev_omm.decisions.schemas import build_mm_questions, build_mm_state
+from jev_omm.flow.signals import flow_prior
+from jev_omm.positioning.adjust import cot_fade, gex_adjust
 from jev_omm.execution.lob import expected_fills
 from jev_omm.surface.svi import (
     SviParams,
@@ -25,6 +27,9 @@ CASES = (
     "liability_facilitator",
     "mm_inventory",
     "vol_surface_mm",
+    "flow_vpin",
+    "dealer_gamma",
+    "cot_fade",
 )
 
 
@@ -407,6 +412,186 @@ def _vol(strategy: str, peer_pnl: float) -> CaseRun:
     return CaseRun(SPECS["vol_surface_mm"], strategy, sc, inv, beta, events)
 
 
+def _flow_vpin(strategy: str, peer_pnl: float) -> CaseRun:
+    """Toxic VPIN / OFI tape. Desk quotes wider and smaller. Naive does not.
+
+    The graded PnL uses ``flow_prior`` in code. A Decision snapshot is logged
+    from the fallback client and is not an order.
+    """
+    n = 24
+    state = 11
+    pnl = 0.0
+    inv: list[float] = []
+    beta: list[float] = []
+    last_toxic = True
+    for _t in range(n):
+        state, z = lcg_next(state)
+        toxic = abs(z) > 0.45
+        last_toxic = toxic
+        vpin = 0.82 if toxic else 0.12
+        ofi = (0.75 if z > 0.0 else -0.75) if toxic else 0.05 * z
+        spoof = 0.70 if toxic else 0.05
+        off = 0.55 if toxic else 0.10
+        aggr = 0.80 if toxic else 0.0
+        if strategy == "desk":
+            _tox, spread_mult, size_mult = flow_prior(vpin, ofi, aggr, off, spoof)
+        else:
+            spread_mult, size_mult = 1.0, 1.0
+        fill_prob = 0.85 / spread_mult
+        adverse = 0.35 if toxic else 0.02
+        pnl += fill_prob * size_mult * (0.08 - adverse)
+        inv.append(size_mult if toxic else 0.0)
+        beta.append(0.0)
+    sc = score_path(pnl, inv, beta, inv_lambda=0.02, beta_lambda=0.0, peer_pnl=peer_pnl)
+    toxic_state = build_mm_state(
+        time=0.0, spot=100.0, option_mid=2.0, iv=0.2, inventory=0,
+        delta=0.2, gamma=0.01, vega=8.0, cash_pnl=0.0, half_spread=0.15, quoting_allowed=True,
+        toxicity_features={
+            "vpin": 0.82,
+            "ofi": 0.75,
+            "aggr_imbalance": 0.80,
+            "off_exchange_share": 0.55,
+            "spoof": 0.70,
+        },
+    )
+    result = DeterministicFallbackClient().system_one(toxic_state, build_mm_questions())
+    mods = apply_policy(result)
+    events = [
+        {
+            "type": "DecisionSnapshot",
+            "source": result.source,
+            "model": result.model,
+            "size_tier": result.answers["size_tier"].choice,
+            "toxicity": float(result.answers["toxicity"].score),
+            "size_mult": mods.size_mult,
+            "spread_mult": mods.spread_mult,
+            "last_step_toxic": last_toxic,
+            "note": (
+                "Choice/Score/Noul from the fallback client on a toxic tape. "
+                "The case engine applies flow_prior. The model returns no ticket."
+            ),
+        }
+    ]
+    return CaseRun(SPECS["flow_vpin"], strategy, sc, inv, beta, events, decision_source=result.source)
+
+
+def _dealer_gamma(strategy: str, peer_pnl: float) -> CaseRun:
+    """Long-gamma pin, then a short-gamma trend.
+
+    Desk uses ``gex_adjust``: wider hedge band and larger size while dealers
+    are long gamma; wider quotes, smaller size, tighter band when they are short.
+    Naive keeps band multiplier 1 and size 1.
+    """
+    n = 20
+    state = 19
+    spot = 100.0
+    pin = 100.0
+    hedge_spot = 100.0
+    pnl = 0.0
+    inv: list[float] = []
+    beta: list[float] = []
+    for t in range(n):
+        state, z = lcg_next(state)
+        if t < 10:
+            gex = 0.80
+            spot += -0.55 * (spot - pin) + 0.40 * z
+            adverse = 0.0
+        else:
+            gex = -0.80
+            spot += 0.55 + 0.15 * z
+            adverse = 0.12
+        if strategy == "desk":
+            _shift, spread, size, band, _urg = gex_adjust(True, gex, (pin - spot) / spot, 0.0, spot)
+        else:
+            spread, size, band = 1.0, 1.0, 1.0
+        gap = spot - hedge_spot
+        slip = 0.0
+        if abs(gap) > 0.80 * band:
+            slip = 0.045 * abs(gap)
+            hedge_spot = spot
+        pnl += (0.06 * size) / spread - slip - adverse * size
+        inv.append(abs(spot - hedge_spot))
+        beta.append(0.0)
+    sc = score_path(pnl, inv, beta, inv_lambda=0.001, beta_lambda=0.0, peer_pnl=peer_pnl)
+    short = build_mm_state(
+        time=0.0, spot=spot, option_mid=2.0, iv=0.22, inventory=0,
+        delta=0.4, gamma=-0.02, vega=6.0, cash_pnl=0.0, half_spread=0.2, quoting_allowed=True,
+        positioning={"gex_enabled": 1.0, "gex_norm": -0.80, "pin_gap": 0.0},
+    )
+    result = DeterministicFallbackClient().system_one(short, build_mm_questions())
+    mods = apply_policy(result)
+    events = [
+        {
+            "type": "DecisionSnapshot",
+            "source": result.source,
+            "model": result.model,
+            "regime": result.answers["regime"].choice,
+            "size_tier": result.answers["size_tier"].choice,
+            "hedge_now": float(result.answers["hedge_now"].noul),
+            "hedge_flag": mods.hedge_now,
+            "spread_mult": mods.spread_mult,
+            "size_mult": mods.size_mult,
+            "note": (
+                "Short-gamma state. Choice/Score/Noul only. "
+                "Hedge urgency is a flag on the snapshot."
+            ),
+        }
+    ]
+    return CaseRun(SPECS["dealer_gamma"], strategy, sc, inv, beta, events, decision_source=result.source)
+
+
+_COT_Z = (0.3, 1.1, 1.8, 2.6, 3.1, 2.2, 0.6, -0.4, -1.6, -2.5, -3.0, -1.4, 0.2, 0.5)
+
+
+def _cot_fade(strategy: str, peer_pnl: float) -> CaseRun:
+    """Weekly speculative z-score. The next return mean-reverts.
+
+    Desk fades |z| >= 1.5. Naive takes the sign of z. Quote size from
+    ``cot_fade`` is logged; the position itself is the fade.
+    """
+    state = 23
+    pnl = 0.0
+    inv: list[float] = []
+    beta: list[float] = []
+    for z in _COT_Z:
+        state, noise = lcg_next(state)
+        ret = -0.18 * z + 0.01 * noise
+        fade = max(-1.0, min(1.0, z / 4.0))
+        if strategy == "desk":
+            pos = -fade if abs(z) >= 1.5 else 0.0
+        else:
+            pos = fade
+        pnl += pos * ret * 10.0
+        inv.append(abs(pos))
+        beta.append(0.0)
+    sc = score_path(pnl, inv, beta, inv_lambda=0.02, beta_lambda=0.0, peer_pnl=peer_pnl)
+    _shift, size_mult = cot_fade(True, 3.1, 100.0)
+    crowded = build_mm_state(
+        time=0.0, spot=100.0, option_mid=2.0, iv=0.2, inventory=0,
+        delta=0.1, gamma=0.01, vega=4.0, cash_pnl=0.0, half_spread=0.12, quoting_allowed=True,
+        positioning={"cot_z": 3.1},
+    )
+    result = DeterministicFallbackClient().system_one(crowded, build_mm_questions())
+    mods = apply_policy(result)
+    events = [
+        {
+            "type": "DecisionSnapshot",
+            "source": result.source,
+            "model": result.model,
+            "size_tier": result.answers["size_tier"].choice,
+            "spread_mult": mods.spread_mult,
+            "policy_size_mult": mods.size_mult,
+            "cot_size_mult": size_mult,
+            "cot_shift": _shift,
+            "note": (
+                "Extreme COT z-score. The fallback widens. "
+                "cot_fade shifts the reservation in code."
+            ),
+        }
+    ]
+    return CaseRun(SPECS["cot_fade"], strategy, sc, inv, beta, events, decision_source=result.source)
+
+
 def run_case(name: str, strategy: str = "desk", peer_pnl: float = 0.0) -> CaseRun:
     if name == "location_arb":
         run, _, _ = _location(strategy, peer_pnl)
@@ -421,6 +606,12 @@ def run_case(name: str, strategy: str = "desk", peer_pnl: float = 0.0) -> CaseRu
         return _mm(strategy, peer_pnl)
     if name == "vol_surface_mm":
         return _vol(strategy, peer_pnl)
+    if name == "flow_vpin":
+        return _flow_vpin(strategy, peer_pnl)
+    if name == "dealer_gamma":
+        return _dealer_gamma(strategy, peer_pnl)
+    if name == "cot_fade":
+        return _cot_fade(strategy, peer_pnl)
     raise KeyError(name)
 
 

@@ -25,6 +25,8 @@ pub const option_mm = @import("option_mm.zig");
 pub const hawkes = @import("hawkes.zig");
 pub const varswap = @import("varswap.zig");
 pub const training = @import("training.zig");
+pub const flow_signals = @import("flow_signals.zig");
+pub const positioning = @import("positioning.zig");
 pub const c_abi = @import("c_abi.zig");
 
 test {
@@ -52,5 +54,7 @@ test {
     _ = hawkes;
     _ = varswap;
     _ = training;
+    _ = flow_signals;
+    _ = positioning;
     _ = c_abi;
 }

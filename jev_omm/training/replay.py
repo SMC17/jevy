@@ -69,6 +69,12 @@ def replay_scores(path: str | Path) -> list[dict]:
             inv_lambda = 0.05
         elif name == "mm_inventory":
             inv_lambda = 0.08
+        elif name == "flow_vpin":
+            inv_lambda = 0.02
+        elif name == "dealer_gamma":
+            inv_lambda = 0.001
+        elif name == "cot_fade":
+            inv_lambda = 0.02
         sc = score_path(
             rec["absolute_pnl"],
             rec["inventory_path"],

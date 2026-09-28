@@ -343,6 +343,24 @@ pub const CSyntheticEdge = extern struct {
     reversal_edge: f64,
 };
 
+/// Inputs travel in one struct. Zig 0.16 mis-reads C float arguments past
+/// the ninth when they are passed individually (the stack slots repeat the
+/// first xmm values). Python ctypes uses the same struct.
+pub const CBoxInputs = extern struct {
+    c1_bid: f64,
+    c1_ask: f64,
+    c2_bid: f64,
+    c2_ask: f64,
+    p1_bid: f64,
+    p1_ask: f64,
+    p2_bid: f64,
+    p2_ask: f64,
+    k1: f64,
+    k2: f64,
+    t: f64,
+    rate: f64,
+};
+
 pub const CBoxResult = extern struct {
     theo_pv: f64,
     package_debit: f64,
@@ -449,30 +467,16 @@ export fn jev_omm_synthetic_edge(
     };
 }
 
-export fn jev_omm_box_spread(
-    c1_bid: f64,
-    c1_ask: f64,
-    c2_bid: f64,
-    c2_ask: f64,
-    p1_bid: f64,
-    p1_ask: f64,
-    p2_bid: f64,
-    p2_ask: f64,
-    k1: f64,
-    k2: f64,
-    t: f64,
-    rate: f64,
-    out: *CBoxResult,
-) callconv(.c) void {
+export fn jev_omm_box_spread(inp: *const CBoxInputs, out: *CBoxResult) callconv(.c) void {
     const box = parity.boxSpread(
-        .{ .bid = c1_bid, .ask = c1_ask },
-        .{ .bid = c2_bid, .ask = c2_ask },
-        .{ .bid = p1_bid, .ask = p1_ask },
-        .{ .bid = p2_bid, .ask = p2_ask },
-        k1,
-        k2,
-        t,
-        rate,
+        .{ .bid = inp.c1_bid, .ask = inp.c1_ask },
+        .{ .bid = inp.c2_bid, .ask = inp.c2_ask },
+        .{ .bid = inp.p1_bid, .ask = inp.p1_ask },
+        .{ .bid = inp.p2_bid, .ask = inp.p2_ask },
+        inp.k1,
+        inp.k2,
+        inp.t,
+        inp.rate,
     );
     out.* = .{
         .theo_pv = box.theo_pv,
@@ -821,7 +825,66 @@ export fn jev_omm_hawkes_intensity(
     return hawkes.intensity(.{ .mu = mu, .alpha = alpha, .beta = beta }, t, events[0..n]);
 }
 
+const flow_signals = @import("flow_signals.zig");
+const positioning = @import("positioning.zig");
+
+pub const CFlowPrior = extern struct {
+    toxicity: f64,
+    spread_mult: f64,
+    size_mult: f64,
+};
+
+pub const CGexAdjust = extern struct {
+    reservation_shift: f64,
+    spread_mult: f64,
+    size_mult: f64,
+    hedge_band_mult: f64,
+    hedge_urgency: f64,
+};
+
+export fn jev_omm_flow_prior(
+    vpin: f64,
+    ofi_norm: f64,
+    aggr_imbalance: f64,
+    off_exchange_share: f64,
+    spoof: f64,
+    out: *CFlowPrior,
+) callconv(.c) void {
+    const p = flow_signals.flowPrior(vpin, ofi_norm, aggr_imbalance, off_exchange_share, spoof);
+    out.* = .{ .toxicity = p.toxicity, .spread_mult = p.spread_mult, .size_mult = p.size_mult };
+}
+
+export fn jev_omm_gex_adjust(
+    enabled: i32,
+    gex_norm: f64,
+    pin_gap: f64,
+    spot_return: f64,
+    mid: f64,
+    out: *CGexAdjust,
+) callconv(.c) void {
+    const g = positioning.gexAdjust(enabled != 0, gex_norm, pin_gap, spot_return, mid);
+    out.* = .{
+        .reservation_shift = g.reservation_shift,
+        .spread_mult = g.spread_mult,
+        .size_mult = g.size_mult,
+        .hedge_band_mult = g.hedge_band_mult,
+        .hedge_urgency = g.hedge_urgency,
+    };
+}
+
+export fn jev_omm_cot_fade(
+    enabled: i32,
+    cot_z: f64,
+    mid: f64,
+    out_shift: *f64,
+    out_size: *f64,
+) callconv(.c) void {
+    const c = positioning.cotFade(enabled != 0, cot_z, mid);
+    out_shift.* = c.shift;
+    out_size.* = c.size_mult;
+}
+
 export fn jev_omm_version() callconv(.c) [*:0]const u8 {
-    return "0.5.0-zig-oom-citadel-lit";
+    return "0.6.0-zig-flow-positioning";
 }
 
