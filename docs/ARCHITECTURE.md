@@ -11,8 +11,8 @@
 
 | Concern | Implementation |
 | --- | --- |
-| BS price + greeks (incl. vanna/volga), A–S / **Guéant asymptotic and ODE** / **option-vega HJB**, multi-strike strip, **multi-expiry term risk**, hard risk, Poisson **and queue** fills, SABR-lite **and SVI/SSVI**, markout, mark PnL, parity/boxes/combos, banded hedge **and spot–vol tilt**, scenario matrix, toxicity **and Hawkes**, variance-swap weights, training-case kernels, sequenced event log + replay | **Zig** (`zig/src/`), shipped as `libjev_omm.so` (C ABI) |
-| TypeSafe / Jev decisions, policy, config, surface glue (prefer Zig SABR), paper demo orchestration, JSONL notebooks | **Python** (`jev_omm/`) — research glue only |
+| BS price + greeks (incl. vanna/volga), A–S / **Guéant asymptotic and ODE** / **option-vega HJB**, multi-strike strip, **multi-expiry term risk**, hard risk, Poisson **and queue** fills, SABR-lite **and SVI/SSVI**, markout, mark PnL, parity/boxes/combos, banded hedge **and spot–vol tilt**, scenario matrix, toxicity **and Hawkes**, **flow prior / GEX / COT scalers**, variance-swap weights, training-case kernels, sequenced event log + replay | **Zig** (`zig/src/`), shipped as `libjev_omm.so` (C ABI) |
+| TypeSafe / Jev decisions, policy, config, surface glue (prefer Zig SABR), COT/GEX/ETF feature builders, paper demo orchestration, JSONL notebooks | **Python** (`jev_omm/`) — research glue only |
 | Python default pricing import | `jev_omm.pricing` → ctypes Zig if `.so` present, else pure Python |
 
 Rust crates (if any) live under `_abandoned_rust/` and are **not** part of the build.
@@ -72,7 +72,8 @@ MarketData ──► Surface / FairValue ──► Quoter (AS + greek penalties)
 - **Parity:** European PCP, synthetic forward / conversion-reversal, box PV + implied rate — executable sides only.
 - **Combos:** vertical / butterfly / straddle / strangle package theos from BS legs.
 - **Hedge:** banded Δ hedge with underlier slippage; greek PnL buckets (½ Γ (ΔS)², θ, ν, inventory MTM); `HedgeFill` / `GreekPnl` event-log types.
-- **Toxicity:** research-grade VPIN-style / imbalance features into Decision `flow.*` (not production VPIN).
+- **Toxicity:** research-grade VPIN-style / imbalance features into Decision `flow.*` (not production VPIN). Lee–Ready, OFI, off-exchange share, and a layered-cancel score join that dict. Zeros leave the fallback rules unchanged.
+- **Positioning:** precomputed GEX, COT z-score, pin gap, basis z, put/call ratio, charm/vanna hedge quantities on Decision `positioning.*`. The fallback reads them only when they are set. Zig applies the same scalers with no network I/O.
 - **Scenario matrix:** spot×IV shock grid with soft/hard loss hooks (Akuna 201 risk analysis).
 
 ### 3.3 Quoter (AS / Guéant + greek penalties)
