@@ -200,5 +200,12 @@ def render_score_markdown(summary: dict[str, float | str] | None = None) -> str:
         f"Noisy ECE by regime: calm {float(s['ece_noisy_calm']):.4f}, "
         f"toxic {float(s['ece_noisy_toxic']):.4f}.\n\n"
         f"{verdict}\n\n"
-        f"{s['note']}\n"
+        f"{s['note']}\n\n"
+        + _sim_loop_section()
     )
+
+
+def _sim_loop_section() -> str:
+    from jev_omm.research.jev_loop import render_sim_loop_markdown
+
+    return render_sim_loop_markdown()

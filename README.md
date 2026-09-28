@@ -6,18 +6,18 @@ Research-oriented **options market-making laboratory** for Sean Collins ([SMC17/
 
 Zig hot path (pricing, quoters, risk, fills, surface, hedge, event log) plus a Python research layer. **TypeSafe System One / Jev** is the decision layer only (Choice / Score / Noul) — it never emits orders. Live `TYPESAFE_API_KEY` wiring is optional and not required. This tree does not claim production market-making readiness.
 
-**Simulation / paper only.** No live brokers, exchange SDKs, or venue API keys. No bundled OPRA or NBBO tape. Empirical gaps (no licensed historical tape, no live Jev scoreboard, microbenchmarks are not system latency) are called out in [`docs/ablation_synthetic.md`](docs/ablation_synthetic.md), [`docs/NUMERICAL.md`](docs/NUMERICAL.md), [`docs/JEV_SCORE.md`](docs/JEV_SCORE.md), and [`docs/PERF.md`](docs/PERF.md).
+**Simulation / paper only.** No live brokers, exchange SDKs, or venue API keys. No licensed OPRA history is bundled. A no-account Databento preview can be downloaded into gitignored `data/local/` (see [`docs/DATA.md`](docs/DATA.md)); the checked-in option file is a synthetic fixture, not a print. Empirical limits (20-row vendor preview, no live Jev key, microbenchmarks are not system latency) are in [`docs/ablation_real_or_fixture.md`](docs/ablation_real_or_fixture.md), [`docs/ablation_adversarial.md`](docs/ablation_adversarial.md), [`docs/ablation_synthetic.md`](docs/ablation_synthetic.md), [`docs/NUMERICAL.md`](docs/NUMERICAL.md), [`docs/JEV_SCORE.md`](docs/JEV_SCORE.md), and [`docs/PERF.md`](docs/PERF.md).
 
 ## Architecture (Zig-first hot path)
 
 | Layer | Language | Role |
 | --- | --- | --- |
-| **Hot path** | **Zig 0.16** (`zig/`) | BS + vanna/volga, A–S, Guéant asymptotic **and ODE**, **constant-vega option MM**, SVI/SSVI, multi-expiry term risk, Poisson **and queue** fills, Hawkes intensity, **flow prior / dealer-gamma / COT scalers**, **instability gate** (identity when off), training kernels, hedge (including spot–vol tilt), event log — C ABI `.so` for Python (`0.8.0-zig-evidence`) |
+| **Hot path** | **Zig 0.16** (`zig/`) | BS + vanna/volga, A–S, Guéant asymptotic **and ODE**, **constant-vega option MM**, SVI/SSVI, multi-expiry term risk, Poisson **and queue** fills, Hawkes intensity, **flow prior / dealer-gamma / COT scalers**, **instability gate** (identity when off), training kernels, hedge (including spot–vol tilt), event log — C ABI `.so` for Python (`0.9.0-zig-falsify`) |
 | **Research glue** | Python (`jev_omm/`) | Config, TypeSafe System One / Jev decisions (Choice/Score/Noul only), latent-state engines, surface/quoter mirrors, training desk, COT / GEX / ETF feature builders, Dupire / rough-vol research, demos, tests |
 
 Classical **A–S reservation price stays pure math**. Jev answers only feed `policy.py` → `QuoteAdjustments`.
 
-The `0.7.0` layer is a latent-state desk: predict the state that makes the next trade obligatory, then gate quotes with `Instability = |F| / L_exec`. See [`docs/STATE_OS.md`](docs/STATE_OS.md). `0.8.0-zig-evidence` does not add another model frontier. It fixes simulator units and hedge accounting, selects the LOB fill path from `run_simulation`, and checks Zig against Python. Zig and Python only.
+The `0.7.0` layer is a latent-state desk: predict the state that makes the next trade obligatory, then gate quotes with `Instability = |F| / L_exec`. See [`docs/STATE_OS.md`](docs/STATE_OS.md). `0.8.0-zig-evidence` does not add another model frontier. It fixes simulator units and hedge accounting, selects the LOB fill path from `run_simulation`, and checks Zig against Python. `0.9.0-zig-falsify` does not add one either. It loads a local tape, replays the same quoters, and writes down where they do not beat a clamped spread after a research fee. Zig and Python only.
 
 ## Quick start — Zig
 
@@ -159,10 +159,16 @@ zig build replay -- jev_omm_events.jsonl # deterministic markout/PnL recompute
 | `risk/` | Hard limits, scenario matrix, **multi-expiry term risk** |
 | `execution/` / `backtest/` | `run_simulation` fill backend: **LOB** (primary) or explicit Poisson. Hedges are booked into cash and the underlier |
 | `demo.py` / `demo_desk.py` / `demo_frontiers.py` / `demo_training.py` | Paper demos, including the training cases |
-| `research/` | Synthetic walk-forward, ablation metrics, numerical checks. No live vendor |
-| `decisions/scoreboard.py` | Paper Brier / log loss / ECE. Jev still does not emit orders |
+| `research/` | Walk-forward on a local CSV/Parquet tape, Databento batch client (env key, no live gateway), adversarial multi-seed tables, numerical checks |
+| `decisions/scoreboard.py` | Paper Brier / log loss / ECE, including the simulator loop. Jev still does not emit orders |
 
-Docs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/ablation_synthetic.md`](docs/ablation_synthetic.md) · [`docs/NUMERICAL.md`](docs/NUMERICAL.md) · [`docs/JEV_SCORE.md`](docs/JEV_SCORE.md) · [`docs/PERF.md`](docs/PERF.md) · [`docs/STATE_OS.md`](docs/STATE_OS.md) · [`docs/FRONTIERS.md`](docs/FRONTIERS.md) · [`docs/TRAINING_CASES.md`](docs/TRAINING_CASES.md) · [`docs/LITERATURE_CANON.md`](docs/LITERATURE_CANON.md) · [`docs/MODULES.md`](docs/MODULES.md) · [`docs/AKUNA_AND_DESK_CURRICULUM.md`](docs/AKUNA_AND_DESK_CURRICULUM.md)
+Docs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/DATA.md`](docs/DATA.md) · [`docs/ablation_real_or_fixture.md`](docs/ablation_real_or_fixture.md) · [`docs/ablation_adversarial.md`](docs/ablation_adversarial.md) · [`docs/ablation_synthetic.md`](docs/ablation_synthetic.md) · [`docs/NUMERICAL.md`](docs/NUMERICAL.md) · [`docs/JEV_SCORE.md`](docs/JEV_SCORE.md) · [`docs/PERF.md`](docs/PERF.md) · [`docs/STATE_OS.md`](docs/STATE_OS.md) · [`docs/FRONTIERS.md`](docs/FRONTIERS.md) · [`docs/TRAINING_CASES.md`](docs/TRAINING_CASES.md) · [`docs/LITERATURE_CANON.md`](docs/LITERATURE_CANON.md) · [`docs/MODULES.md`](docs/MODULES.md) · [`docs/AKUNA_AND_DESK_CURRICULUM.md`](docs/AKUNA_AND_DESK_CURRICULUM.md)
+
+Walk-forward on the synthetic fixture (no network):
+
+```bash
+python -m jev_omm.research.real_report
+```
 
 ## License
 
