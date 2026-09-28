@@ -10,7 +10,7 @@ history, and it does not open a live session.
 | `load_tape("synthetic")` | GBM spot path inside the 0.8 harness | generated |
 | `jev_omm/data/fixtures/tape_synthetic.csv` | Schema-compatible option NBBO, `synthetic_fixture=1`, invented prices, symbol `SYNTH` | yes |
 | Databento public sample | Short vendor preview, no account | raw file no, aggregates in `docs/ablation_real_or_fixture.md` |
-| `DATABENTO_API_KEY` historical slice | Bounded `timeseries.get_range` | raw file no |
+| Keyed historical client | Documented, gated off (`DATABENTO_HISTORICAL` unset). Not used and not tested | — |
 
 The fixture is not an OPRA print. Do not cite its prices as market data.
 
@@ -115,33 +115,19 @@ Live URLs are refused (`opra://`, `live.databento.com`, `hist.databento.com`
 as a tape path, `ws://`, `wss://`). A local filename that contains the word
 `databento` is a file, not a session.
 
-## Historical API (key in the environment only)
+## Keyed historical client (gated off, not tested)
 
-```bash
-export DATABENTO_API_KEY=...          # never commit this
-export DATABENTO_MAX_COST_USD=0       # default. A key alone does not spend.
-```
+No Databento API key is required. This tree does not wait on one and does
+not call `hist.databento.com`. The checked-in walk-forward uses the public
+sample aggregates and the synthetic fixture only.
 
-`jev_omm.research.databento_hist.fetch_historical_slice` calls
-`https://hist.databento.com/v0/metadata.get_cost` and then, only if the
-estimate is within the cap, `timeseries.get_range` with an explicit `start`
-and `end` and `encoding=csv`. The live gateway host is refused. The response
-is written under `data/local/` and mapped with the same loader.
-
-Example parameters for a short OPRA minute slice, once you accept the cost
-by raising `DATABENTO_MAX_COST_USD`:
-
-```text
-dataset=OPRA.PILLAR
-schema=cbbo-1m
-symbols=<OSI symbol>
-stype_in=raw_symbol
-start=2023-08-28T13:30
-end=2023-08-28T14:00
-```
-
-This environment had no `DATABENTO_API_KEY`, so no paid slice was requested.
-Do not point this client at `live.databento.com`.
+`fetch_historical_slice` stays in the source as an optional batch client.
+It raises before any HTTP call unless `DATABENTO_HISTORICAL=1`. Tests do
+not enter it. If you later set that variable yourself, you also need
+`DATABENTO_API_KEY` in the environment (never commit it) and
+`DATABENTO_MAX_COST_USD` above the estimate (default 0, so a key alone
+still does not spend). The live gateway host is refused. Responses would
+land in `data/local/`. That path is not part of the 0.9 evidence.
 
 ## Walk-forward
 
