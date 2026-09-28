@@ -15,7 +15,7 @@
 | TypeSafe / Jev decisions, policy, config, surface glue (prefer Zig SABR), COT/GEX/ETF feature builders, paper demo orchestration, JSONL notebooks | **Python** (`jev_omm/`) — research glue only |
 | Python default pricing import | `jev_omm.pricing` → ctypes Zig if `.so` present, else pure Python |
 
-Rust crates (if any) live under `_abandoned_rust/` and are **not** part of the build.
+Zig and Python only. This tree has no Rust crate.
 
 ---
 
@@ -210,6 +210,10 @@ Optional dep: `typesafe-sdk` (never required for offline fallback tests).
 | **Later** | Hardware-shaped MD path research; not a v0 blocker |
 
 ---
+
+## 6b. Latent-state gate (`0.7.0-zig-state-os`)
+
+Python builds `S_t`, forced flow, executable liquidity, constraint level-sets, and clocks (`jev_omm/state_os/`). Zig multiplies a precomputed instability scalar into spread, size, and hedge urgency (`state_os.zig`). The multiplier is 1 when the flag is off. The offline fallback maps a high ratio, a binding constraint, a live parent, or a GEX sign disagreement onto Choice / Score / Noul. Full write-up: [STATE_OS.md](./STATE_OS.md).
 
 ## 7. Non-goals (architecture)
 
