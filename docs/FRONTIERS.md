@@ -1,7 +1,7 @@
 # Frontiers — surface, term risk, queue fills, Guéant ODE, then training and option-vega MM
 
-**Version:** `0.5.0-zig-oom-citadel-lit` (`jev_omm_version`)  
-Frontiers 1–4 below shipped in `0.4.0-zig-frontiers-1-4` and stay as specified. Frontiers 5–8 are the `0.5.0` layer.  
+**Version:** `0.6.0-zig-flow-positioning` (`jev_omm_version`)  
+Frontiers 1–4 below shipped in `0.4.0-zig-frontiers-1-4` and stay as specified. Frontiers 5–8 are the `0.5.0` layer. Frontier 9 is the `0.6.0` flow and positioning layer.  
 **Mode:** simulation / paper only. No live exchange SDKs, brokers, or venue keys.  
 **Decision layer:** TypeSafe System One / Jev stays in Python (`decisions/`). It returns Choice / Score / Noul answers. It does not emit orders. A live `TYPESAFE_API_KEY` is optional and is **not** required to build, test, or run these demos — missing key uses `DeterministicFallbackClient`.
 
@@ -222,7 +222,7 @@ pytest -q
 **Code:** `jev_omm/training/`, `zig/src/training.zig`, `zig build training`, `python -m jev_omm.demo_training`.  
 **Write-up:** [TRAINING_CASES.md](./TRAINING_CASES.md).
 
-Six paper cases (`location_arb`, `pm_fair_value`, `etf_ap_arb`, `liability_facilitator`, `mm_inventory`, `vol_surface_mm`). Each has a role, an information set, constraints, and a score: absolute PnL, relative PnL versus the naive policy, inventory-path penalty, unhedged-beta penalty, execution penalty. JSONL replay recomputes the score from stored paths.
+Paper cases (`location_arb`, `pm_fair_value`, `etf_ap_arb`, `liability_facilitator`, `mm_inventory`, `vol_surface_mm`, and from `0.6.0` `flow_vpin`, `dealer_gamma`, `cot_fade`). Each has a role, an information set, constraints, and a score: absolute PnL, relative PnL versus the naive policy, inventory-path penalty, unhedged-beta penalty, execution penalty. JSONL replay recomputes the score from stored paths.
 
 `location_arb` cannot hedge inside the sim (no futures). The desk path is an out-of-sim futures overlay whose true beta is 0.85, so basis risk remains. `pm_fair_value` longs cheap names and forces a market-neutral opposing leg. `liability_facilitator` takes a forced client block and works it in slices (algo gap 1 vs hand gap 12) while skipping discretionary adds. `mm_inventory` tags `forced` vs `discretionary` flow. The graded policy widens and skews. A `predatory` research mode joins the wave and sells into peer covering; it is not the default grade.
 
@@ -263,14 +263,37 @@ The unit-test toy is a small grid (`γ=0.5`, `ξ=1`, `A=40`, `k=2`, `V̄=40`, 31
 
 Details and links: [LITERATURE_CANON.md](./LITERATURE_CANON.md).
 
+## 9. Flow and positioning (paper)
+
+**Code:** `jev_omm/flow/signals.py`, `jev_omm/positioning/`, `zig/src/flow_signals.zig`, `zig/src/positioning.zig`.  
+**C ABI:** `jev_omm_flow_prior`, `jev_omm_gex_adjust`, `jev_omm_cot_fade`.  
+**Version string:** `0.6.0-zig-flow-positioning`.
+
+Features are precomputed. Zig does no network I/O. Every scaler is the identity when its inputs are zero or its flag is off, so existing quote modes are unchanged.
+
+| Edge | What landed | What it changes |
+| --- | --- | --- |
+| Signed tape | Lee–Ready, one-level OFI, aggressive imbalance, a synthetic off-exchange share, bucket VPIN | `flow_prior` → spread and size |
+| Layered book | Cancel-behind-touch score (not a spoofing strategy) | same toxicity blend |
+| Dealer gamma | OI × BS gamma × a dealer sign. `short_premium` (default, both signs −1) stays negative and has no flip. `dashboard_flip` (calls +1, puts −1) is the dashboard assumption that can cross zero | reservation shift, spread, size, hedge-band multiplier, hedge urgency |
+| Pin | Max pain and the zero-gamma level, blended only if normalized GEX is positive | `pin_gap` into the long-gamma shift |
+| Charm / vanna | Central-difference charm and existing vanna, as a hedge quantity | `overlay_hedge_qty`. Zero shocks add nothing |
+| COT | Legacy, disaggregated, and TFF column maps. Net spec, commercial hedge ratio, week-over-week, trailing z. Equity index from TFF, commodities from the disaggregated file | `cot_fade` shifts reservation against the crowded side and cuts size |
+| ETF / basis / beta | Create vs redeem pressure, annualized roll z, futures overlay `q = −exposure / β` | feature builders. Graded `etf_ap_arb` and `location_arb` scores are unchanged |
+
+Training cases `flow_vpin`, `dealer_gamma`, and `cot_fade` grade the desk policy against a naive one. Python and Zig share the LCG and the scaler constants. Citations: [LITERATURE_CANON.md](./LITERATURE_CANON.md).
+
+The public CFTC JSON endpoint is implemented and **gated** (`JEV_COT_NETWORK=1` or `allow_network=True`). Tests read `jev_omm/data/fixtures/` only. Fixture numbers are synthetic; the column names match the Socrata schema.
+
 ## Still later
 
 - Live `TYPESAFE_API_KEY` / pinning `jev-1.x` (hooks exist; fallback is the default).
-- Historical OPRA/LOB replay instead of the synthetic queue.
+- Historical OPRA/LOB replay instead of the synthetic queue. Off-exchange volume here is a flag, not a FINRA feed.
+- SEC Form 13F. Quarterly, lagged, and a poor fit for a quote-time feature without a holdings parser. Deferred on purpose.
 - Full no-arbitrage SVI calibration with cross-expiry joint SSVI (joint MLE across expiries is not).
 - The Baldacci §4 euro grid (20 strikes × 4 expiries, \(\overline{\mathcal{V}}=10^7\)) as a production lookup. The HJB here is a small research grid; `solveGrid` accepts several contract vegas, the quoter wrapper prices one name.
 - Multi-agent peer market makers (the MM case is a synthetic wave plus cancel latency).
 - Full Bergomi forward-variance curve, Heston PDE, American exercise.
-- Charm / color hedge bands beyond the spot–vol tilt. Vanna and volga already live on the term book.
+- Color hedge bands. Charm and vanna are overlays on a precomputed shock, not a new band schedule. Vanna and volga already live on the term book.
 - Two-name dispersion.
 - Any live order path. Out of scope.

@@ -8,6 +8,9 @@
 //!   5. mm_inventory — graded policy widens/skews. `.predatory` joins the wave
 //!      and is not the default grade.
 //!   6. vol_surface_mm — refuse butterfly / calendar violations.
+//!   7. flow_vpin — widen and cut size into toxic VPIN / OFI.
+//!   8. dealer_gamma — lean with long gamma; defend in short gamma.
+//!   9. cot_fade — fade an extreme speculative z-score.
 //!
 //! Article (the `/p/` path 404s; this is the live URL):
 //!   https://www.predictingalpha.com/blogs/what-i-learned-from-citadels-training-software
@@ -18,6 +21,8 @@
 const std = @import("std");
 const svi = @import("svi.zig");
 const lob = @import("lob.zig");
+const flow = @import("flow_signals.zig");
+const positioning = @import("positioning.zig");
 
 pub const Strategy = enum(u8) { naive = 0, desk = 1, predatory = 2 };
 
@@ -342,6 +347,95 @@ fn volSurface(strategy: Strategy, peer_pnl: f64) CaseScore {
     return scorePath(pnl - regime_pen, &inv, &beta, 0.0, 0.0, arb_pen, peer_pnl);
 }
 
+fn flowVpin(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const n: usize = 24;
+    var state: u32 = 11;
+    var pnl: f64 = 0.0;
+    var inv: [24]f64 = undefined;
+    var beta: [24]f64 = [_]f64{0.0} ** 24;
+    var t: usize = 0;
+    while (t < n) : (t += 1) {
+        const z = lcgNext(&state);
+        const toxic = @abs(z) > 0.45;
+        const vpin: f64 = if (toxic) 0.82 else 0.12;
+        const ofi: f64 = if (toxic) (if (z > 0.0) 0.75 else -0.75) else 0.05 * z;
+        const spoof: f64 = if (toxic) 0.70 else 0.05;
+        const off: f64 = if (toxic) 0.55 else 0.10;
+        const aggr: f64 = if (toxic) 0.80 else 0.0;
+        var spread_mult: f64 = 1.0;
+        var size_mult: f64 = 1.0;
+        if (strategy == .desk) {
+            const prior = flow.flowPrior(vpin, ofi, aggr, off, spoof);
+            spread_mult = prior.spread_mult;
+            size_mult = prior.size_mult;
+        }
+        const fill_prob = 0.85 / spread_mult;
+        const adverse: f64 = if (toxic) 0.35 else 0.02;
+        pnl += fill_prob * size_mult * (0.08 - adverse);
+        inv[t] = if (toxic) size_mult else 0.0;
+    }
+    return scorePath(pnl, &inv, &beta, 0.02, 0.0, 0.0, peer_pnl);
+}
+
+fn dealerGamma(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const n: usize = 20;
+    var state: u32 = 19;
+    var spot: f64 = 100.0;
+    const pin: f64 = 100.0;
+    var hedge_spot: f64 = 100.0;
+    var pnl: f64 = 0.0;
+    var inv: [20]f64 = undefined;
+    var beta: [20]f64 = [_]f64{0.0} ** 20;
+    var t: usize = 0;
+    while (t < n) : (t += 1) {
+        const z = lcgNext(&state);
+        const gex: f64 = if (t < 10) 0.80 else -0.80;
+        var adverse: f64 = 0.0;
+        if (t < 10) {
+            spot += -0.55 * (spot - pin) + 0.40 * z;
+        } else {
+            spot += 0.55 + 0.15 * z;
+            adverse = 0.12;
+        }
+        var spread: f64 = 1.0;
+        var size: f64 = 1.0;
+        var band: f64 = 1.0;
+        if (strategy == .desk) {
+            const g = positioning.gexAdjust(true, gex, (pin - spot) / spot, 0.0, spot);
+            spread = g.spread_mult;
+            size = g.size_mult;
+            band = g.hedge_band_mult;
+        }
+        const gap = spot - hedge_spot;
+        var slip: f64 = 0.0;
+        if (@abs(gap) > 0.80 * band) {
+            slip = 0.045 * @abs(gap);
+            hedge_spot = spot;
+        }
+        pnl += (0.06 * size) / spread - slip - adverse * size;
+        inv[t] = @abs(spot - hedge_spot);
+    }
+    return scorePath(pnl, &inv, &beta, 0.001, 0.0, 0.0, peer_pnl);
+}
+
+const cot_z = [_]f64{ 0.3, 1.1, 1.8, 2.6, 3.1, 2.2, 0.6, -0.4, -1.6, -2.5, -3.0, -1.4, 0.2, 0.5 };
+
+fn cotFadeCase(strategy: Strategy, peer_pnl: f64) CaseScore {
+    var state: u32 = 23;
+    var pnl: f64 = 0.0;
+    var inv: [14]f64 = undefined;
+    var beta: [14]f64 = [_]f64{0.0} ** 14;
+    for (cot_z, 0..) |z, i| {
+        const noise = lcgNext(&state);
+        const ret = -0.18 * z + 0.01 * noise;
+        const fade = @min(@max(z / 4.0, -1.0), 1.0);
+        const pos: f64 = if (strategy == .desk) (if (@abs(z) >= 1.5) -fade else 0.0) else fade;
+        pnl += pos * ret * 10.0;
+        inv[i] = @abs(pos);
+    }
+    return scorePath(pnl, &inv, &beta, 0.02, 0.0, 0.0, peer_pnl);
+}
+
 pub fn runCase(name: []const u8, strategy: Strategy, peer_pnl: f64) CaseScore {
     if (std.mem.eql(u8, name, "location_arb")) return location(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "pm_fair_value")) return pmFair(strategy, peer_pnl);
@@ -349,6 +443,9 @@ pub fn runCase(name: []const u8, strategy: Strategy, peer_pnl: f64) CaseScore {
     if (std.mem.eql(u8, name, "liability_facilitator")) return facilitator(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "mm_inventory")) return mmInventory(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "vol_surface_mm")) return volSurface(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "flow_vpin")) return flowVpin(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "dealer_gamma")) return dealerGamma(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "cot_fade")) return cotFadeCase(strategy, peer_pnl);
     return .{};
 }
 
@@ -359,6 +456,9 @@ pub const CASES = [_][]const u8{
     "liability_facilitator",
     "mm_inventory",
     "vol_surface_mm",
+    "flow_vpin",
+    "dealer_gamma",
+    "cot_fade",
 };
 
 test "location arb sim cannot hedge; futures overlay leaves basis risk" {
@@ -421,6 +521,31 @@ test "vol surface desk refuses butterfly and calendar arb" {
     const desk = runCase("vol_surface_mm", .desk, naive.absolute_pnl);
     try std.testing.expect(desk.risk_adjusted > naive.risk_adjusted);
     try std.testing.expect(desk.exec_penalty < naive.exec_penalty);
+}
+
+test "flow desk quotes through toxicity and keeps more pnl" {
+    const naive = runCase("flow_vpin", .naive, 0.0);
+    const desk = runCase("flow_vpin", .desk, naive.absolute_pnl);
+    try std.testing.expect(desk.absolute_pnl > naive.absolute_pnl);
+    try std.testing.expect(desk.risk_adjusted > naive.risk_adjusted);
+    try std.testing.expect(desk.mean_abs_inventory < naive.mean_abs_inventory);
+}
+
+test "dealer gamma desk beats a flat band" {
+    const naive = runCase("dealer_gamma", .naive, 0.0);
+    const desk = runCase("dealer_gamma", .desk, naive.absolute_pnl);
+    try std.testing.expect(desk.absolute_pnl > 0.0);
+    try std.testing.expect(naive.absolute_pnl < 0.0);
+    try std.testing.expect(desk.absolute_pnl > naive.absolute_pnl);
+    try std.testing.expect(desk.risk_adjusted > naive.risk_adjusted);
+}
+
+test "cot desk fades the extreme and beats the crowd" {
+    const naive = runCase("cot_fade", .naive, 0.0);
+    const desk = runCase("cot_fade", .desk, naive.absolute_pnl);
+    try std.testing.expect(desk.absolute_pnl > 0.0);
+    try std.testing.expect(naive.absolute_pnl < 0.0);
+    try std.testing.expect(desk.risk_adjusted > naive.risk_adjusted);
 }
 
 test "lcg is deterministic" {

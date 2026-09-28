@@ -138,6 +138,30 @@ SPECS: dict[str, CaseSpec] = {
         lesson="Quote the strip only inside the SVI no-arb set. Sticky-strike and sticky-delta are different marks.",
         citation="https://arxiv.org/abs/1204.0646",
     ),
+    "flow_vpin": CaseSpec(
+        name="flow_vpin",
+        role="market maker reading a signed tape",
+        information_set=["VPIN", "order-flow imbalance", "off-exchange share", "layered-cancel score"],
+        constraints=["paper tape", "flow_prior is code", "Decision snapshot is not an order"],
+        lesson="Quote wider and smaller when volume-synchronized toxicity, OFI, and layered cancels line up. A tight quote collects the adverse move.",
+        citation="https://doi.org/10.1093/rfs/hhs053",
+    ),
+    "dealer_gamma": CaseSpec(
+        name="dealer_gamma",
+        role="options market maker in a dealer-gamma regime",
+        information_set=["normalized dealer GEX", "pin gap", "hedge band"],
+        constraints=["short-premium and dashboard signs are assumptions", "max pain is not a forecast", "no live OI feed"],
+        lesson="Long dealer gamma: lean toward the pin and let the hedge band widen. Short dealer gamma: cut size, widen, and hedge sooner.",
+        citation="https://doi.org/10.2139/ssrn.3725454",
+    ),
+    "cot_fade": CaseSpec(
+        name="cot_fade",
+        role="futures-positioning overlay",
+        information_set=["speculative net z-score", "week-over-week change is not required to fade"],
+        constraints=["weekly CFTC print", "mean-reverting synthetic return", "no live order"],
+        lesson="Do not join an extreme speculative COT print. Fade it. A mild z-score is not an extreme.",
+        citation="https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm",
+    ),
 }
 
 

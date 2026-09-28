@@ -7,7 +7,7 @@ const training = root.training;
 
 pub fn main() void {
     std.debug.print("jevy training desk — simulation / paper only\n", .{});
-    std.debug.print("cases: location_arb, pm_fair_value, etf_ap_arb, liability_facilitator, mm_inventory, vol_surface_mm\n", .{});
+    std.debug.print("cases: location_arb, pm_fair_value, etf_ap_arb, liability_facilitator, mm_inventory, vol_surface_mm, flow_vpin, dealer_gamma, cot_fade\n", .{});
     std.debug.print("Decision layer is not on this binary; Python demo logs fallback Choice/Score/Noul.\n\n", .{});
     for (training.CASES) |name| {
         const naive = training.runCase(name, .naive, 0.0);

@@ -231,3 +231,13 @@ def spot_vol_hedge_qty(
     s = max(abs(spot), 1e-16)
     tilt = rho * xi * portfolio_vega / (2.0 * (nu**0.5) * s)
     return -net_delta - tilt
+
+
+def scaled_delta_band(delta_band: float, band_mult: float) -> float:
+    """GEX (and any other) band scale. Multiplier 1 leaves the band unchanged."""
+    return delta_band * band_mult
+
+
+def overlay_hedge_qty(base_qty: float, charm_hedge: float = 0.0, vanna_hedge: float = 0.0) -> float:
+    """Add precomputed charm and vanna hedge quantities. Zeros are a no-op."""
+    return base_qty + charm_hedge + vanna_hedge
