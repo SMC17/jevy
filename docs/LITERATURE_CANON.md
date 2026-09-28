@@ -127,3 +127,32 @@ Put/call OI and a 25-delta risk-reversal stress are spread multipliers in `apply
 ## Decision layer
 
 TypeSafe System One / Jev: [blog](https://typesafe.ai/blog/introducing-system-one-models-and-jev), [docs](https://docs.typesafe.ai/). Choice / Score / Noul only. `DeterministicFallbackClient` is the no-key path. Tests: `tests/test_decisions_client.py`, `tests/test_decisions_policy.py`.
+
+## Latent state and forced flow (`0.7.0`)
+
+Map and formulas: [STATE_OS.md](./STATE_OS.md). Tests: `tests/test_state_os.py` and the Zig `state_os` / training tests. Fixture files under `jev_omm/data/fixtures/state_os_*.json` are synthetic.
+
+| Source | Module | Test |
+| --- | --- | --- |
+| Cheng & Madhavan, *The Dynamics of Leveraged and Inverse Exchange-Traded Funds*, JOIM Q4 2009. [SSRN 1539120](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1539120) | `letf_rebalance` | `test_standup_engines_and_fixtures`, Zig `letf, tdf, coverage` |
+| Federal Reserve H.4.1, Treasury DTS, NY Fed ON RRP (links in STATE_OS.md) | `net_liquidity` | same. Levels in the fixture are not a release |
+| 17 CFR § 240.10b-18. [eCFR](https://www.ecfr.gov/current/title-17/chapter-II/part-240/section-240.10b-18). Bettis, Coles, Lemmon, JFE 2000. [DOI 10.1016/S0304-405X(00)00055-6](https://doi.org/10.1016/S0304-405X(00)00055-6) | `in_issuer_blackout` | caller dates only |
+| Perold & Sharpe, FAJ 1988. [DOI 10.2469/faj.v44.n1.16](https://doi.org/10.2469/faj.v44.n1.16) | `pension_equity_trade` | exact and linear signs |
+| Moreira & Muir, JF 2017. [DOI 10.1111/jofi.12513](https://doi.org/10.1111/jofi.12513) | `vol_target_weight` | boundary step |
+| Hurst, Ooi, Pedersen, JPM 2017. [DOI 10.3905/jpm.2017.44.1.015](https://doi.org/10.3905/jpm.2017.44.1.015). Hamill, Rattray, Van Hemert. [SSRN 2831926](https://doi.org/10.2139/ssrn.2831926) | `cta_weight` | uptrend sign |
+| Asness, Frazzini, Pedersen, FAJ 2012. [DOI 10.2469/faj.v68.n1.1](https://doi.org/10.2469/faj.v68.n1.1) | `risk_parity_weights` | inverse-vol |
+| Vanguard, *The rebalancing edge*. [PDF](https://corporate.vanguard.com/content/dam/corp/research/pdf/the_rebalancing_edge_optimizing_target_date_fund_rebalancing_through_threshold_based_strategies.pdf) | `tdf_trade` 200/175 | `tdf_threshold` |
+| Cboe BXM. [Dashboard](https://www.cboe.com/us/indices/dashboard/bxm/) | `gen1_roll_dates`, `gen3_coverage` | twelve Fridays; rich IV raises cover |
+| Cboe SPX contract facts. [Page](https://www.cboe.com/tradable_products/sp_500/spx_options/). CME E-mini point value 50 | `spx_vanna_charm_es` | SPY conversion is null |
+| Cushing & Madhavan, JFM 2000. [DOI 10.1016/S1386-4181(99)00014-0](https://doi.org/10.1016/S1386-4181(99)00014-0) | `auction_imbalance` | 80/20 → 0.6 |
+| D'Avolio, JFE 2002. [DOI 10.1016/S0304-405X(02)00206-4](https://doi.org/10.1016/S0304-405X(02)00206-4). Duffie, Gârleanu, Pedersen, JFE 2002. [DOI 10.1016/S0304-405X(02)00226-X](https://doi.org/10.1016/S0304-405X(02)00226-X) | `borrow_pressure` | fixture, not a vendor tape |
+| Du, Tepper, Verdelhan, JF 2018. [DOI 10.1111/jofi.12620](https://doi.org/10.1111/jofi.12620) | `in_slr_window`, CIP term in `scarcity_rent` | window and SOFR-versus-specials |
+| Duffie, *Special Repo Rates*, JF 1996. [DOI 10.1111/j.1540-6261.1996.tb02692.x](https://doi.org/10.1111/j.1540-6261.1996.tb02692.x) | `scarcity_rent` | specials outweigh a SOFR change |
+| Eisler, Bouchaud, Kockelkoren, QF 2012. [DOI 10.1080/14697688.2010.528444](https://doi.org/10.1080/14697688.2010.528444) | `latent_book` | ∂E[C]/∂σ |
+| Tóth et al., Phys. Rev. X 2011. [DOI 10.1103/PhysRevX.1.021006](https://doi.org/10.1103/PhysRevX.1.021006). Bacry, Iuga, Lasnier, Lehalle, MML 2015. [DOI 10.1142/S2382626615500094](https://doi.org/10.1142/S2382626615500094). Almgren, Thum, Hauptmann, Li, Risk, July 2005 | `metaorder` | concave impact, partial reversion, noise rejected |
+| Benzaquen, Mastromatteo, Eisler, Bouchaud, J. Stat. Mech. 2017. [DOI 10.1088/1742-5468/aa53f7](https://doi.org/10.1088/1742-5468/aa53f7) | `cross_impact` | common-flow trap |
+| Filimonov & Sornette, Phys. Rev. E 2012. [DOI 10.1103/PhysRevE.85.056108](https://doi.org/10.1103/PhysRevE.85.056108). Hardiman, Bercot, Bouchaud, EPJB 2013. [DOI 10.1140/epjb/e2013-40107-3](https://doi.org/10.1140/epjb/e2013-40107-3) | `hawkes_tv` | endogenous versus exogenous |
+| Guillaume, JOD 2015. [DOI 10.3905/jod.2015.22.3.073](https://doi.org/10.3905/jod.2015.22.3.073) | `autocall_flow` | mass on the barrier |
+| Koijen & Yogo, AER 2015. [DOI 10.1257/aer.20121036](https://doi.org/10.1257/aer.20121036) | `hedge_by_regime` | economic ≠ statutory |
+| Richard & Roll, JF 1989. [DOI 10.1111/j.1540-6261.1989.tb05062.x](https://doi.org/10.1111/j.1540-6261.1989.tb05062.x) | `mbs_hedge` | deep discount is off |
+| Bank of England FSR, December 2022. [Report](https://www.bankofengland.co.uk/financial-stability-report/2022/december-2022) | `ldi_cash_need` | velocity gate, not a live feed |

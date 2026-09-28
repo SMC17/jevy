@@ -93,6 +93,10 @@ class QuoteAdjustments(BaseModel):
     composite_toxicity: float = 0.0
     reason: str = ""
     result: Optional[SystemOneResult] = None
+    # Copied from latent state when the caller passes it. Zeros are the identity.
+    instability: float = 0.0
+    parent_remaining: float = 0.0
+    constraint_active: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +143,7 @@ def build_mm_state(
     underlier_pos: float = 0.0,
     net_delta: float | None = None,
     positioning: dict[str, float] | None = None,
+    latent: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Structured program state for System One (not chat text).
 
@@ -150,6 +155,7 @@ def build_mm_state(
     """
     flow = toxicity_features or {}
     pos = positioning or {}
+    lat = latent or {}
     return {
         "session": {"time_years": time, "quoting_allowed": quoting_allowed},
         "market": {
@@ -198,6 +204,17 @@ def build_mm_state(
             "charm_hedge": float(pos.get("charm_hedge", 0.0)),
             "vanna_hedge": float(pos.get("vanna_hedge", 0.0)),
             "note": "precomputed features; zeros leave the fallback on the previous rules",
+        },
+        "latent": {
+            "enabled": float(lat.get("enabled", 0.0)),
+            "instability": float(lat.get("instability", 0.0)),
+            "f_net": float(lat.get("f_net", 0.0)),
+            "l_exec": float(lat.get("l_exec", 0.0)),
+            "constraint_active": float(lat.get("constraint_active", 0.0)),
+            "parent_remaining": float(lat.get("parent_remaining", 0.0)),
+            "gex_disagree": float(lat.get("gex_disagree", 0.0)),
+            "tau_pressure": float(lat.get("tau_pressure", 0.0)),
+            "note": "precomputed S_t scalars; enabled=0 leaves the fallback on the previous rules",
         },
         "policy_note": (
             "European single-series options MM sim. "

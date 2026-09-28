@@ -6,9 +6,9 @@
 **Command:** `cd zig && zig build bench -Doptimize=ReleaseFast`  
 **Clock:** `CLOCK_MONOTONIC`  
 **Note:** Inputs varied each iteration (volatile) to defeat dead-code elimination.  
-**Version:** `0.6.0-zig-flow-positioning`  
+**Version:** `0.7.0-zig-state-os`  
 
-The rows below were measured on `0.5.0-zig-oom-citadel-lit`. The `0.6.0` flow-prior, GEX, and COT scalers are unit-tested and are not in this table.
+The rows below were measured on `0.5.0-zig-oom-citadel-lit`. The `0.6.0` flow-prior, GEX, and COT scalers, and the `0.7.0` instability gate, are unit-tested and are not in this table. The gate is a handful of multiplies on precomputed scalars. It does not reprice the book.
 
 Numbers move with the machine. The previous `0.3.0` table was a different host; do not compare absolute nanoseconds across boxes. The rows below, including the 0.4 hot path, were measured together on this VM after the option-MM, Hawkes, and training benches were added.
 

@@ -1,0 +1,7 @@
+{
+  "note": "Synthetic borrow snapshot. Not a securities-lending vendor tape.",
+  "utilization": 0.92,
+  "fee": 0.045,
+  "days_to_cover": 8.0,
+  "delta_lendable": -0.20
+}
