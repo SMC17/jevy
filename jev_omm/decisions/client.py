@@ -247,6 +247,11 @@ class DeterministicFallbackClient(DecisionClient):
             tox_idx += 1.0
         if tox_feat > 0.7:
             tox_idx += 0.5
+        hawkes_ex = float(flow.get("hawkes_excitation", 0.0))
+        if hawkes_ex > 1.0:
+            tox_idx += 1.0
+        if hawkes_ex > 2.0:
+            tox_idx += 0.5
         tox_idx = min(3.0, tox_idx)
         tox_probs = {}
         for i, _ in enumerate(TOXICITY_LEVELS):
@@ -259,7 +264,12 @@ class DeterministicFallbackClient(DecisionClient):
 
         informed = min(
             0.95,
-            0.15 + 0.04 * abs(inv) + 0.01 * ret_bps + 0.35 * tox_feat + 0.25 * vpin,
+            0.15
+            + 0.04 * abs(inv)
+            + 0.01 * ret_bps
+            + 0.35 * tox_feat
+            + 0.25 * vpin
+            + 0.15 * min(hawkes_ex, 3.0),
         )
         widen = min(
             0.95,
@@ -273,8 +283,14 @@ class DeterministicFallbackClient(DecisionClient):
         hedge = min(0.95, 0.1 + 0.05 * abs(inv) + (0.3 if regime == "stressed" else 0.0))
         surface_suspect = 0.25 if half > 1.0 else 0.08
 
+        arb = state.get("arb") or {}
+        near_risk_free = bool(arb.get("near_risk_free", False))
         if tox_score >= 2.0 or regime == "stressed":
             size_tier, size_conf = "tiny", 0.72
+        elif near_risk_free:
+            # Training hook: near-risk-free arb is sized in code as large.
+            # This Choice is not an order.
+            size_tier, size_conf = "large", 0.90
         elif regime == "calm" and abs(inv) < 5:
             size_tier, size_conf = "large", 0.68
         else:
