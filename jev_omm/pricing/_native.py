@@ -40,6 +40,23 @@ class _CSyntheticEdge(Structure):
     ]
 
 
+class _CBoxInputs(Structure):
+    _fields_ = [
+        ("c1_bid", c_double),
+        ("c1_ask", c_double),
+        ("c2_bid", c_double),
+        ("c2_ask", c_double),
+        ("p1_bid", c_double),
+        ("p1_ask", c_double),
+        ("p2_bid", c_double),
+        ("p2_ask", c_double),
+        ("k1", c_double),
+        ("k2", c_double),
+        ("t", c_double),
+        ("rate", c_double),
+    ]
+
+
 class _CBoxResult(Structure):
     _fields_ = [
         ("theo_pv", c_double),
@@ -194,12 +211,7 @@ def _bind(lib: ctypes.CDLL) -> None:
     ]
     lib.jev_omm_synthetic_edge.restype = None
 
-    lib.jev_omm_box_spread.argtypes = [
-        c_double, c_double, c_double, c_double,
-        c_double, c_double, c_double, c_double,
-        c_double, c_double, c_double, c_double,
-        POINTER(_CBoxResult),
-    ]
+    lib.jev_omm_box_spread.argtypes = [POINTER(_CBoxInputs), POINTER(_CBoxResult)]
     lib.jev_omm_box_spread.restype = None
 
     lib.jev_omm_hedge_propose.argtypes = [c_double, POINTER(_CHedgeConfig), POINTER(_CHedgeOrder)]
@@ -366,10 +378,11 @@ if ZIG_AVAILABLE:
         k1: float, k2: float, t: float, rate: float,
     ) -> dict:
         out = _CBoxResult()
-        _lib.jev_omm_box_spread(
+        inp = _CBoxInputs(
             c1_bid, c1_ask, c2_bid, c2_ask, p1_bid, p1_ask, p2_bid, p2_ask,
-            k1, k2, t, rate, ctypes.byref(out),
+            k1, k2, t, rate,
         )
+        _lib.jev_omm_box_spread(ctypes.byref(inp), ctypes.byref(out))
         return {f: getattr(out, f) for f, _ in _CBoxResult._fields_}
 
     def hedge_propose(net_delta: float, delta_band: float = 5.0, half_spread: float = 0.0,

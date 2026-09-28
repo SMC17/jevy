@@ -124,6 +124,28 @@ def greeks(
     return Greeks(delta=delta, gamma=gamma, vega=vega, theta=theta, vanna=vanna, volga=volga)
 
 
+def charm_tau(
+    spot: float,
+    strike: float,
+    t: float,
+    rate: float,
+    div_yield: float,
+    iv: float,
+    is_call: bool,
+    eps: float = 1e-4,
+) -> float:
+    """Central difference ∂Δ/∂τ with τ = time to expiry.
+
+    A calendar step ``dt`` (years passing) changes delta by ``-charm_tau * dt``.
+    Near expiry the difference is defined as 0. Same step in ``black_scholes.zig``.
+    """
+    if t <= 2.0 * eps or iv <= 0.0 or spot <= 0.0:
+        return 0.0
+    up = greeks(spot, strike, t + eps, rate, div_yield, iv, is_call).delta
+    dn = greeks(spot, strike, t - eps, rate, div_yield, iv, is_call).delta
+    return (up - dn) / (2.0 * eps)
+
+
 def price_and_greeks(
     spot: float,
     strike: float,

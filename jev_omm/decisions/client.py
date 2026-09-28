@@ -21,6 +21,7 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
+from jev_omm.flow.signals import flow_toxicity
 from jev_omm.decisions.schemas import (
     REGIME_CRITERIA,
     SIZE_TIER_CRITERIA,
@@ -217,6 +218,11 @@ class DeterministicFallbackClient(DecisionClient):
         cash_pnl = float(book.get("cash_pnl", 0.0))
         ret_bps = abs(float(market.get("spot_return_bps", 0.0)))
         half = float(market.get("half_spread", 0.1))
+        flow = state.get("flow", {})
+        pos = state.get("positioning") or {}
+        gex_on = float(pos.get("gex_enabled", 0.0)) >= 0.5
+        gex_norm = float(pos.get("gex_norm", 0.0))
+        cot_z = float(pos.get("cot_z", 0.0))
 
         # Regime choice
         if abs(inv) > 15 or cash_pnl < -100 or ret_bps > 40:
@@ -227,14 +233,22 @@ class DeterministicFallbackClient(DecisionClient):
             regime, regime_conf = "trending", 0.65
         else:
             regime, regime_conf = "calm", 0.80
+        # Short dealer gamma is a stressed book. Flag stays off unless the
+        # caller set positioning.gex_enabled, so the default state is unchanged.
+        if gex_on and gex_norm <= -0.55:
+            regime, regime_conf = "stressed", 0.80
         regime_probs = {k: 0.05 for k in REGIME_CRITERIA}
         regime_probs[regime] = max(0.55, regime_conf)
         s = sum(regime_probs.values())
         regime_probs = {k: v / s for k, v in regime_probs.items()}
 
-        flow = state.get("flow", {})
         tox_feat = float(flow.get("toxicity_composite", 0.0))
         vpin = float(flow.get("vpin", 0.0))
+        ofi = float(flow.get("ofi", 0.0))
+        aggr = float(flow.get("aggr_imbalance", 0.0))
+        off_share = float(flow.get("off_exchange_share", 0.0))
+        spoof = float(flow.get("spoof", 0.0))
+        tape_tox = flow_toxicity(vpin, ofi, aggr, off_share, spoof)
         tox_idx = 0.0
         if abs(inv) > 10:
             tox_idx += 1.0
@@ -252,6 +266,8 @@ class DeterministicFallbackClient(DecisionClient):
             tox_idx += 1.0
         if hawkes_ex > 2.0:
             tox_idx += 0.5
+        if tape_tox >= 0.55:
+            tox_idx += 1.5
         tox_idx = min(3.0, tox_idx)
         tox_probs = {}
         for i, _ in enumerate(TOXICITY_LEVELS):
@@ -271,16 +287,26 @@ class DeterministicFallbackClient(DecisionClient):
             + 0.25 * vpin
             + 0.15 * min(hawkes_ex, 3.0),
         )
+        if tape_tox >= 0.55:
+            informed = min(0.95, informed + 0.30)
         widen = min(
             0.95,
             0.2 + 0.03 * abs(inv) + 0.15 * (1 if regime in ("volatile", "stressed") else 0),
         )
+        if tape_tox >= 0.55:
+            widen = min(0.95, max(widen, 0.72))
+        if gex_on and gex_norm <= -0.55:
+            widen = min(0.95, widen + 0.20)
+        if abs(cot_z) >= 2.0:
+            widen = min(0.95, widen + 0.40)
         pull = (
             0.85
             if (abs(inv) > 20 or cash_pnl < -200)
             else (0.55 if regime == "stressed" and tox_score > 2 else 0.08)
         )
         hedge = min(0.95, 0.1 + 0.05 * abs(inv) + (0.3 if regime == "stressed" else 0.0))
+        if gex_on and gex_norm <= -0.55:
+            hedge = min(0.95, hedge + 0.35)
         surface_suspect = 0.25 if half > 1.0 else 0.08
 
         arb = state.get("arb") or {}
@@ -295,6 +321,18 @@ class DeterministicFallbackClient(DecisionClient):
             size_tier, size_conf = "large", 0.68
         else:
             size_tier, size_conf = "normal", 0.75
+        if tape_tox >= 0.55 or (gex_on and gex_norm <= -0.55):
+            size_tier, size_conf = "tiny", max(size_conf, 0.74)
+        elif (
+            gex_on
+            and gex_norm >= 0.55
+            and abs(cot_z) < 2.0
+            and size_tier == "normal"
+            and regime in ("calm", "trending")
+        ):
+            size_tier, size_conf = "large", 0.72
+        if abs(cot_z) >= 2.0 and size_tier == "large":
+            size_tier, size_conf = "normal", 0.70
         size_probs = {k: 0.08 for k in SIZE_TIER_CRITERIA}
         size_probs[size_tier] = max(0.55, size_conf)
         ss = sum(size_probs.values())
