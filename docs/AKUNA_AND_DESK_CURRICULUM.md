@@ -2,7 +2,7 @@
 
 **Repo:** [SMC17/jevy](https://github.com/SMC17/jevy)  
 **Mode:** simulation / paper only  
-**Version:** `0.6.0-zig-flow-positioning`  
+**Version:** `0.7.0-zig-state-os`  
 **Public curriculum anchors (real URLs only):**
 - https://akunacapital.com/work-with-us/options-101/
 - Teachable Options 101 outline themes: terminology, how MM profits, futures/options, payoffs, time premium, **put-call parity**, theos & combination spreads, limits/boundaries, spreads/flies, theo & P&L, Greeks (delta hedge, gamma, theta, vol, vega, **rho & boxes**)
@@ -85,4 +85,4 @@ python -m jev_omm.demo_training
 
 ## Version
 
-C ABI `jev_omm_version` → `0.6.0-zig-flow-positioning`.
+C ABI `jev_omm_version` → `0.7.0-zig-state-os`.

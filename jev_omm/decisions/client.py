@@ -333,6 +333,45 @@ class DeterministicFallbackClient(DecisionClient):
             size_tier, size_conf = "large", 0.72
         if abs(cot_z) >= 2.0 and size_tier == "large":
             size_tier, size_conf = "normal", 0.70
+
+        # Latent-state gate. Absent or enabled=0 leaves every branch above as it was.
+        # High |F|/L, a binding constraint, a live parent, or a GEX sign
+        # disagreement moves Choice / Score / Noul. It does not emit an order.
+        latent = state.get("latent") or {}
+        latent_on = float(latent.get("enabled", 0.0)) >= 0.5
+        instability = float(latent.get("instability", 0.0)) if latent_on else 0.0
+        parent_remaining = float(latent.get("parent_remaining", 0.0)) if latent_on else 0.0
+        constraint_on = latent_on and float(latent.get("constraint_active", 0.0)) >= 0.5
+        gex_disagree = latent_on and float(latent.get("gex_disagree", 0.0)) >= 0.5
+        if latent_on and instability >= 1.25:
+            regime, regime_conf = "stressed", max(regime_conf, 0.82)
+            regime_probs = {k: 0.05 for k in REGIME_CRITERIA}
+            regime_probs[regime] = max(0.55, regime_conf)
+            s = sum(regime_probs.values())
+            regime_probs = {k: v / s for k, v in regime_probs.items()}
+        elif latent_on and instability >= 0.75 and regime == "calm":
+            regime, regime_conf = "volatile", max(regime_conf, 0.70)
+            regime_probs = {k: 0.05 for k in REGIME_CRITERIA}
+            regime_probs[regime] = max(0.55, regime_conf)
+            s = sum(regime_probs.values())
+            regime_probs = {k: v / s for k, v in regime_probs.items()}
+        if latent_on and instability >= 0.75:
+            widen = min(0.95, max(widen, 0.72))
+        if latent_on and parent_remaining >= 0.25:
+            informed = min(0.95, informed + 0.28)
+            widen = min(0.95, max(widen, 0.60))
+        if gex_disagree:
+            widen = min(0.95, widen + 0.18)
+        if latent_on and (instability >= 2.0 or constraint_on):
+            pull = 0.88
+        if latent_on and (instability >= 1.25 or constraint_on):
+            hedge = min(0.95, hedge + 0.40)
+        if latent_on and (instability >= 0.75 or parent_remaining >= 0.25 or constraint_on or gex_disagree):
+            size_tier, size_conf = "tiny", max(size_conf, 0.74)
+            size_probs = {k: 0.08 for k in SIZE_TIER_CRITERIA}
+            size_probs[size_tier] = max(0.55, size_conf)
+            ss = sum(size_probs.values())
+            size_probs = {k: v / ss for k, v in size_probs.items()}
         size_probs = {k: 0.08 for k in SIZE_TIER_CRITERIA}
         size_probs[size_tier] = max(0.55, size_conf)
         ss = sum(size_probs.values())

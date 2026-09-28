@@ -7,6 +7,7 @@
 const std = @import("std");
 const bs = @import("black_scholes.zig");
 const flow = @import("flow_signals.zig");
+const state_os = @import("state_os.zig");
 
 fn clamp(x: f64, lo: f64, hi: f64) f64 {
     return @min(@max(x, lo), hi);
@@ -99,20 +100,37 @@ pub const FeatureInputs = struct {
     basis_z: f64 = 0.0,
     rr_stress_value: f64 = 0.0,
     put_call_oi: f64 = 0.0,
+    state_enabled: bool = false,
+    instability: f64 = 0.0,
+    constraint_active: bool = false,
+    parent_remaining: f64 = 0.0,
+    f_signed: f64 = 0.0,
+    l_exec: f64 = 0.0,
 };
 
 pub fn applyFeatures(inp: FeatureInputs) PositioningAdjust {
     const prior = flow.flowPrior(inp.vpin, inp.ofi_norm, inp.aggr_imbalance, inp.off_exchange_share, inp.spoof);
     const g = gexAdjust(inp.gex_enabled, inp.gex_norm, inp.pin_gap, inp.spot_return, inp.mid);
     const c = cotFade(inp.cot_enabled, inp.cot_z, inp.mid);
-    var spread = prior.spread_mult * g.spread_mult * basisSpreadMult(inp.basis_z) * rrSpreadMult(inp.rr_stress_value) * pcrSpreadMult(inp.put_call_oi);
-    var size = prior.size_mult * g.size_mult * c.size_mult;
+    const gate = state_os.stateGate(
+        inp.state_enabled,
+        inp.instability,
+        inp.constraint_active,
+        inp.parent_remaining,
+        inp.f_signed,
+        inp.l_exec,
+        inp.mid,
+    );
+    var spread = prior.spread_mult * g.spread_mult * basisSpreadMult(inp.basis_z) * rrSpreadMult(inp.rr_stress_value) * pcrSpreadMult(inp.put_call_oi) * gate.spread_mult;
+    var size = prior.size_mult * g.size_mult * c.size_mult * gate.size_mult;
     spread = clamp(spread, 0.70, 3.50);
     size = clamp(size, 0.20, 1.80);
+    if (gate.pull) size = 0.0;
     var urgency = g.hedge_urgency;
     if (prior.toxicity > 0.60) urgency = @max(urgency, 0.30);
+    urgency = @max(urgency, gate.hedge_urgency);
     return .{
-        .reservation_shift = g.reservation_shift + c.shift,
+        .reservation_shift = g.reservation_shift + c.shift + gate.reservation_shift,
         .spread_mult = spread,
         .size_mult = size,
         .hedge_band_mult = g.hedge_band_mult,

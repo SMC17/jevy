@@ -1,6 +1,6 @@
 # Training cases — Citadel-style paper desk
 
-**Version:** `0.6.0-zig-flow-positioning`  
+**Version:** `0.7.0-zig-state-os`  
 **Code:** `jev_omm/training/` (research desk, JSONL, Decision hook) and `zig/src/training.zig` (same LCG and constants).  
 **Mode:** simulation / paper only. No live venues. The decision model never emits orders.
 
@@ -120,6 +120,22 @@ The graded PnL is that scaler, in Python and in Zig, on the same LCG. A Decision
 **Lesson:** the next return in this case mean-reverts. The desk fades only when `|z| ≥ 1.5`. The naive book takes the sign of z, including mild prints. Extreme COT also widens the fallback quote. `cot_fade` itself moves the reservation against the crowd; that shift is code.
 
 Tests: `test_training_flow_gamma_and_cot`, Zig `cot desk fades the extreme and beats the crowd`.
+
+## 10–16. State-OS cases
+
+Same score as the earlier cases. The desk policy is code. A Decision snapshot, when the case logs one, is Choice / Score / Noul from `DeterministicFallbackClient`. It is not an order. Zig runs the same arithmetic through `state_os.zig`.
+
+| Case | Lesson |
+| --- | --- |
+| `letf_day` | Cheng–Madhavan demand `AUM (L² − L) r` is a buy on an up day. The desk sells that demand and covers the revert. The naive book buys the close. |
+| `instability_spike` | A calm bar is the identity. `|F|/L = 4` pulls the desk quote. The naive book keeps size 1 into the print. |
+| `remaining_parent` | Size is cut only while the parent fraction is still positive. After the parent stops, the desk size goes back to 1. |
+| `constraint_gate` | Vol above the cap binds the level-set and the desk size is 0. Inside the cap both books quote. |
+| `gex_disagree` | Structural gamma is long and flow-signed gamma is short. The desk cuts size. The naive book leans with the pin and the path follows the flow. |
+| `tdf_threshold` | A 250 bp drift trades back to 175 bp from target (`−7.5` on 1000 of AUM). A 100 bp drift trades 0. |
+| `overwrite_roll` | Gen-3 cover is `0.50 + 2(IV − IV_ref)`. The desk sells rich implied vol. The naive book skips the roll. |
+
+Tests: `test_state_os_training_cases_teach_the_gate`, Zig `state-os cases: the desk policy beats the naive one`.
 
 ## What this is not
 
