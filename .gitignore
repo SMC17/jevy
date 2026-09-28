@@ -23,8 +23,9 @@ zig/.zig-cache/
 *.dll
 *.a
 
-# Sim outputs
+# Sim outputs and large research dumps (small tables live in docs/)
 *.jsonl
+artifacts/
 
 # OS / editor
 .DS_Store

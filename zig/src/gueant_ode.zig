@@ -440,6 +440,28 @@ test "ode near flat inventory matches gueant asymptotic" {
     try std.testing.expect(ode5.delta_a < ode.delta_a);
 }
 
+test "long-horizon rk4 offsets stay near the spectral mode" {
+    // Guéant–Lehalle–Fernandez-Tapia, arXiv 1105.3115. The spectral
+    // eigenmode is the stationary shape; RK4 over a long horizon should
+    // land nearby. Tolerance is relative, not a published table digit.
+    const cfg = QuoterConfig{
+        .gamma = 0.1,
+        .kappa = 1.5,
+        .sigma = 0.4,
+        .A = 80.0,
+        .t_horizon = 4.0,
+        .inventory_cap = 6,
+        .ode_steps = 1600,
+        .min_half_spread = 1e-6,
+        .max_half_spread = 50.0,
+        .mode = .gueant_ode,
+    };
+    const rk = optimalOffsets(&cfg, 1);
+    const sp = spectralOffsets(&cfg, 1);
+    try std.testing.expect(relClose(rk.delta_b, sp.delta_b, 0.2));
+    try std.testing.expect(relClose(rk.delta_a, sp.delta_a, 0.2));
+}
+
 test "ode deep inventory bids wider than the unbounded asymptotic" {
     const cfg = QuoterConfig{
         .gamma = 0.1,
