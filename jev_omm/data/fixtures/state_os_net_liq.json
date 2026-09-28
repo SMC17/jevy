@@ -1,0 +1,9 @@
+{
+  "note": "Synthetic levels for the net-liquidity stub. Not an H.4.1 print.",
+  "fed_assets": 7200.0,
+  "tga": 700.0,
+  "rrp": 400.0,
+  "d_fed": -20.0,
+  "d_tga": 35.0,
+  "d_rrp": -10.0
+}

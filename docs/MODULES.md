@@ -132,9 +132,13 @@ Greek P&L explain landed in `hedge.greekPnlStep` / event-log `GreekPnl` + `Hedge
 
 **Upgrade:** structured logging, metrics export.
 
+## `state_os/`
+
+Latent-state desk. `vector.py` is S_t and `|F|/L_exec`. `gate.py` / `state_os.zig` scale the quote and are the identity when off. `engines.py` is the accounting and clock layer. `gex_flow.py` separates flow-signed gamma from the open-interest book and refuses an ES conversion of SPY. Research cores (`latent_book`, `metaorder`, `impact`, `constraints`, `cross_impact`, `funding`, `hawkes_tv`) and warehouse terms (`warehouse.py`) are Python. Write-up: [STATE_OS.md](./STATE_OS.md).
+
 ## `training/`
 
-Citadel-style paper cases, plus `flow_vpin`, `dealer_gamma`, and `cot_fade`. See [TRAINING_CASES.md](./TRAINING_CASES.md). Zig twin: `zig/src/training.zig`, `zig build training`. Default grade is the `desk` policy. `mm_inventory` also exposes an ungraded `predatory` research mode. The three new cases share scaler constants with Zig. Existing case scores are unchanged.
+Citadel-style paper cases, plus `flow_vpin`, `dealer_gamma`, `cot_fade`, and the seven state-OS cases. See [TRAINING_CASES.md](./TRAINING_CASES.md). Zig twin: `zig/src/training.zig`, `zig build training`. Default grade is the `desk` policy. `mm_inventory` also exposes an ungraded `predatory` research mode. The state-OS cases share formulas with `state_os.zig`. Earlier case scores are unchanged.
 
 ## `surface/dupire.py`, `surface/rough_vol.py`, `pricing/varswap.py`
 

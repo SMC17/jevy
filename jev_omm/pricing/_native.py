@@ -455,12 +455,8 @@ else:
         raise NotImplementedError("Zig lib required for native spread_edge")
 
 
-# Back-compat alias used briefly during Rust spike
-RUST_AVAILABLE = False
-
 __all__ = [
     "ZIG_AVAILABLE",
-    "RUST_AVAILABLE",
     "price",
     "greeks",
     "price_and_greeks",

@@ -27,6 +27,7 @@ pub const varswap = @import("varswap.zig");
 pub const training = @import("training.zig");
 pub const flow_signals = @import("flow_signals.zig");
 pub const positioning = @import("positioning.zig");
+pub const state_os = @import("state_os.zig");
 pub const c_abi = @import("c_abi.zig");
 
 test {
@@ -56,5 +57,6 @@ test {
     _ = training;
     _ = flow_signals;
     _ = positioning;
+    _ = state_os;
     _ = c_abi;
 }

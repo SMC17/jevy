@@ -34,8 +34,8 @@ def main() -> None:
         snap = next((e for e in desk.events if e.get("type") == "DecisionSnapshot"), None)
         if snap:
             print(
-                f"  decision source={snap['source']} size_tier={snap['size_tier']}"
-                f"  policy_size_mult={snap['size_mult']}  engine_size={snap['engine_size']}"
+                f"  decision source={snap.get('source')} size_tier={snap.get('size_tier')}"
+                f"  policy_size_mult={snap.get('size_mult')}  engine_size={snap.get('engine_size')}"
             )
         print()
     board = leaderboard([r for r in runs if r.strategy == "desk"])

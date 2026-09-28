@@ -11,6 +11,13 @@
 //!   7. flow_vpin — widen and cut size into toxic VPIN / OFI.
 //!   8. dealer_gamma — lean with long gamma; defend in short gamma.
 //!   9. cot_fade — fade an extreme speculative z-score.
+//!  10. letf_day — supply the Cheng–Madhavan close buy, cover the revert.
+//!  11. instability_spike — pull when |F|/L reaches 4.
+//!  12. remaining_parent — smaller while the parent is still printing.
+//!  13. constraint_gate — size 0 once vol crosses the cap.
+//!  14. gex_disagree — do not pin when flow-signed gamma disagrees.
+//!  15. tdf_threshold — 200 bp trigger, 175 bp destination.
+//!  16. overwrite_roll — sell gen-3 cover when IV is rich.
 //!
 //! Article (the `/p/` path 404s; this is the live URL):
 //!   https://www.predictingalpha.com/blogs/what-i-learned-from-citadels-training-software
@@ -23,6 +30,7 @@ const svi = @import("svi.zig");
 const lob = @import("lob.zig");
 const flow = @import("flow_signals.zig");
 const positioning = @import("positioning.zig");
+const state_os = @import("state_os.zig");
 
 pub const Strategy = enum(u8) { naive = 0, desk = 1, predatory = 2 };
 
@@ -436,6 +444,96 @@ fn cotFadeCase(strategy: Strategy, peer_pnl: f64) CaseScore {
     return scorePath(pnl, &inv, &beta, 0.02, 0.0, 0.0, peer_pnl);
 }
 
+fn letfDay(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const demand = state_os.letfRebalance(100.0, 3.0, 0.02);
+    const impact = demand / 40.0 * 0.50;
+    const reversion = 0.65 * impact;
+    const pnl: f64 = if (strategy == .desk) demand * reversion else -demand * reversion;
+    const inv = if (strategy == .desk) [_]f64{ demand, 0.0 } else [_]f64{ demand, demand };
+    const beta = [_]f64{ 0.0, 0.0 };
+    return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
+}
+
+fn instabilitySpike(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const forced = [_]f64{ 0.0, 80.0 };
+    const liquidity = [_]f64{ 50.0, 20.0 };
+    var pnl: f64 = 0.0;
+    var inv: [2]f64 = undefined;
+    for (forced, liquidity, 0..) |f, l, i| {
+        const ratio = state_os.instability(f, l);
+        const size: f64 = if (strategy == .desk)
+            state_os.stateGate(true, ratio, false, 0.0, -f, l, 100.0).size_mult
+        else
+            1.0;
+        const adverse: f64 = if (f > 0.0) 1.25 else 0.0;
+        pnl += 0.05 * size - adverse * size;
+        inv[i] = size;
+    }
+    const beta = [_]f64{ 0.0, 0.0 };
+    return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
+}
+
+fn remainingParent(strategy: Strategy, peer_pnl: f64) CaseScore {
+    var pnl: f64 = 0.0;
+    var inv: [12]f64 = undefined;
+    var beta = [_]f64{0.0} ** 12;
+    for (0..12) |i| {
+        const remaining: f64 = if (i < 8) 1.0 - @as(f64, @floatFromInt(i + 1)) / 8.0 else 0.0;
+        const adverse: f64 = if (i < 8) 0.20 else 0.0;
+        const size: f64 = if (strategy == .desk)
+            state_os.stateGate(true, 0.0, false, remaining, 0.0, 1.0, 100.0).size_mult
+        else
+            1.0;
+        pnl += 0.04 * size - adverse * size;
+        inv[i] = size;
+    }
+    return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
+}
+
+fn constraintGate(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const sigmas = [_]f64{ 0.12, 0.16, 0.22, 0.28, 0.18 };
+    var pnl: f64 = 0.0;
+    var inv: [5]f64 = undefined;
+    var beta = [_]f64{0.0} ** 5;
+    for (sigmas, 0..) |sigma, i| {
+        const active = sigma > 0.20;
+        const size: f64 = if (strategy == .desk)
+            state_os.stateGate(true, 0.0, active, 0.0, 0.0, 1.0, 100.0).size_mult
+        else
+            1.0;
+        const shock: f64 = if (active) 0.80 else 0.0;
+        pnl += 0.05 * size - shock * size;
+        inv[i] = size;
+    }
+    return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
+}
+
+fn gexDisagree(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const disagree = state_os.signsDisagree(0.60, -0.80);
+    const size: f64 = if (strategy == .desk) (if (disagree) 0.40 else 1.0) else 1.15;
+    const pnl: f64 = if (strategy == .desk) -0.05 * size else -1.0 * 0.25 * size;
+    const inv = [_]f64{size};
+    const beta = [_]f64{0.0};
+    return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
+}
+
+fn tdfThreshold(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const trade: f64 = if (strategy == .desk) state_os.tdfTrade(0.625, 0.60, 1000.0) else 0.0;
+    const pnl = trade * -0.02;
+    const inv = [_]f64{@abs(trade)};
+    const beta = [_]f64{0.0};
+    return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
+}
+
+fn overwriteRoll(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const coverage: f64 = if (strategy == .desk) state_os.gen3Coverage(0.28, 0.18) else 0.0;
+    const premium = 1.50 * coverage;
+    const pnl = premium - 0.25 * premium;
+    const inv = [_]f64{coverage};
+    const beta = [_]f64{0.0};
+    return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
+}
+
 pub fn runCase(name: []const u8, strategy: Strategy, peer_pnl: f64) CaseScore {
     if (std.mem.eql(u8, name, "location_arb")) return location(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "pm_fair_value")) return pmFair(strategy, peer_pnl);
@@ -446,6 +544,13 @@ pub fn runCase(name: []const u8, strategy: Strategy, peer_pnl: f64) CaseScore {
     if (std.mem.eql(u8, name, "flow_vpin")) return flowVpin(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "dealer_gamma")) return dealerGamma(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "cot_fade")) return cotFadeCase(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "letf_day")) return letfDay(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "instability_spike")) return instabilitySpike(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "remaining_parent")) return remainingParent(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "constraint_gate")) return constraintGate(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "gex_disagree")) return gexDisagree(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "tdf_threshold")) return tdfThreshold(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "overwrite_roll")) return overwriteRoll(strategy, peer_pnl);
     return .{};
 }
 
@@ -459,6 +564,13 @@ pub const CASES = [_][]const u8{
     "flow_vpin",
     "dealer_gamma",
     "cot_fade",
+    "letf_day",
+    "instability_spike",
+    "remaining_parent",
+    "constraint_gate",
+    "gex_disagree",
+    "tdf_threshold",
+    "overwrite_roll",
 };
 
 test "location arb sim cannot hedge; futures overlay leaves basis risk" {
@@ -546,6 +658,25 @@ test "cot desk fades the extreme and beats the crowd" {
     try std.testing.expect(desk.absolute_pnl > 0.0);
     try std.testing.expect(naive.absolute_pnl < 0.0);
     try std.testing.expect(desk.risk_adjusted > naive.risk_adjusted);
+}
+
+fn deskBeatsNaive(name: []const u8) !void {
+    const naive = runCase(name, .naive, 0.0);
+    const desk = runCase(name, .desk, naive.absolute_pnl);
+    try std.testing.expect(desk.risk_adjusted > naive.risk_adjusted);
+    try std.testing.expect(desk.absolute_pnl > naive.absolute_pnl);
+}
+
+test "state-os cases: the desk policy beats the naive one" {
+    try deskBeatsNaive("letf_day");
+    try deskBeatsNaive("instability_spike");
+    try deskBeatsNaive("remaining_parent");
+    try deskBeatsNaive("constraint_gate");
+    try deskBeatsNaive("gex_disagree");
+    try deskBeatsNaive("tdf_threshold");
+    try deskBeatsNaive("overwrite_roll");
+    try std.testing.expectApproxEqAbs(runCase("letf_day", .desk, 0.0).absolute_pnl, 1.17, 1e-12);
+    try std.testing.expectApproxEqAbs(runCase("tdf_threshold", .desk, 0.0).absolute_pnl, 0.15, 1e-12);
 }
 
 test "lcg is deterministic" {

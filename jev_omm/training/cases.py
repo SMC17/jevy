@@ -11,6 +11,10 @@ from jev_omm.decisions.policy import apply_policy
 from jev_omm.decisions.schemas import build_mm_questions, build_mm_state
 from jev_omm.flow.signals import flow_prior
 from jev_omm.positioning.adjust import cot_fade, gex_adjust
+from jev_omm.state_os.engines import gen3_coverage, letf_rebalance, tdf_trade
+from jev_omm.state_os.gate import state_gate
+from jev_omm.state_os.gex_flow import signs_disagree
+from jev_omm.state_os.vector import instability as instability_ratio
 from jev_omm.execution.lob import expected_fills
 from jev_omm.surface.svi import (
     SviParams,
@@ -30,6 +34,13 @@ CASES = (
     "flow_vpin",
     "dealer_gamma",
     "cot_fade",
+    "letf_day",
+    "instability_spike",
+    "remaining_parent",
+    "constraint_gate",
+    "gex_disagree",
+    "tdf_threshold",
+    "overwrite_roll",
 )
 
 
@@ -592,6 +603,200 @@ def _cot_fade(strategy: str, peer_pnl: float) -> CaseRun:
     return CaseRun(SPECS["cot_fade"], strategy, sc, inv, beta, events, decision_source=result.source)
 
 
+def _snapshot(state: dict, engine_size: float) -> tuple[dict, str]:
+    result = DeterministicFallbackClient().system_one(state, build_mm_questions())
+    mods = apply_policy(result, state=state)
+    event = {
+        "type": "DecisionSnapshot",
+        "source": result.source,
+        "model": result.model,
+        "size_tier": result.answers["size_tier"].choice,
+        "size_mult": mods.size_mult,
+        "spread_mult": mods.spread_mult,
+        "engine_size": engine_size,
+        "pull": mods.pull,
+        "hedge_now": mods.hedge_now,
+        "instability": mods.instability,
+        "note": "Choice/Score/Noul only. The case engine applies the state gate in code.",
+    }
+    return event, result.source
+
+
+def _letf_day(strategy: str, peer_pnl: float) -> CaseRun:
+    """Cheng–Madhavan close. Desk supplies the buy program and covers the revert."""
+    demand = letf_rebalance(100.0, 3.0, 0.02)
+    impact = demand / 40.0 * 0.50
+    reversion = 0.65 * impact
+    if strategy == "desk":
+        pnl = demand * reversion
+        inv = [demand, 0.0]
+    else:
+        pnl = -demand * reversion
+        inv = [demand, demand]
+    beta = [0.0, 0.0]
+    sc = score_path(pnl, inv, beta, inv_lambda=0.0, beta_lambda=0.0, peer_pnl=peer_pnl)
+    events = [
+        {
+            "type": "LetfRebalance",
+            "demand": demand,
+            "reversion": reversion,
+            "note": "Q = AUM (L^2 - L) r. Positive demand is a buy of the underlying.",
+        }
+    ]
+    return CaseRun(SPECS["letf_day"], strategy, sc, inv, beta, events)
+
+
+def _instability_spike(strategy: str, peer_pnl: float) -> CaseRun:
+    """Calm bar, then |F|/L = 4. Desk pulls. Naive keeps size 1 into the print."""
+    steps = ((0.0, 50.0), (80.0, 20.0))
+    pnl = 0.0
+    inv: list[float] = []
+    last_size = 1.0
+    for forced, liquidity in steps:
+        ratio = instability_ratio(forced, liquidity)
+        if strategy == "desk":
+            gate = state_gate(True, ratio, False, 0.0, -forced, liquidity, 100.0)
+            size = gate.size_mult
+        else:
+            size = 1.0
+        last_size = size
+        adverse = 1.25 if forced > 0.0 else 0.0
+        pnl += 0.05 * size - adverse * size
+        inv.append(size)
+    beta = [0.0, 0.0]
+    sc = score_path(pnl, inv, beta, inv_lambda=0.0, beta_lambda=0.0, peer_pnl=peer_pnl)
+    hot = build_mm_state(
+        time=0.0, spot=100.0, option_mid=2.0, iv=0.2, inventory=0,
+        delta=0.2, gamma=0.01, vega=4.0, cash_pnl=0.0, half_spread=0.12, quoting_allowed=True,
+        latent={"enabled": 1.0, "instability": 4.0, "f_net": -80.0, "l_exec": 20.0},
+    )
+    snap, source = _snapshot(hot, last_size if strategy == "desk" else 1.0)
+    return CaseRun(SPECS["instability_spike"], strategy, sc, inv, beta, [snap], decision_source=source)
+
+
+def _remaining_parent(strategy: str, peer_pnl: float) -> CaseRun:
+    """Eight printing bars, then four quiet bars. Desk is smaller only while the parent lives."""
+    pnl = 0.0
+    inv: list[float] = []
+    for i in range(12):
+        if i < 8:
+            remaining = 1.0 - (i + 1) / 8.0
+            adverse = 0.20
+        else:
+            remaining = 0.0
+            adverse = 0.0
+        if strategy == "desk":
+            gate = state_gate(True, 0.0, False, remaining, 0.0, 1.0, 100.0)
+            size = gate.size_mult
+        else:
+            size = 1.0
+        pnl += 0.04 * size - adverse * size
+        inv.append(size)
+    beta = [0.0] * 12
+    sc = score_path(pnl, inv, beta, inv_lambda=0.0, beta_lambda=0.0, peer_pnl=peer_pnl)
+    live = build_mm_state(
+        time=0.0, spot=100.0, option_mid=2.0, iv=0.2, inventory=0,
+        delta=0.1, gamma=0.01, vega=4.0, cash_pnl=0.0, half_spread=0.1, quoting_allowed=True,
+        latent={"enabled": 1.0, "parent_remaining": 0.75, "l_exec": 1.0},
+    )
+    snap, source = _snapshot(live, inv[-1] if strategy == "desk" else 1.0)
+    return CaseRun(SPECS["remaining_parent"], strategy, sc, inv, beta, [snap], decision_source=source)
+
+
+def _constraint_gate(strategy: str, peer_pnl: float) -> CaseRun:
+    """Vol-target cap at 0.20. Two bars bind. Desk size is 0 on those bars."""
+    cap = 0.20
+    pnl = 0.0
+    inv: list[float] = []
+    for sigma in (0.12, 0.16, 0.22, 0.28, 0.18):
+        active = sigma > cap
+        if strategy == "desk":
+            gate = state_gate(True, 0.0, active, 0.0, 0.0, 1.0, 100.0)
+            size = gate.size_mult
+        else:
+            size = 1.0
+        shock = 0.80 if active else 0.0
+        pnl += 0.05 * size - shock * size
+        inv.append(size)
+    beta = [0.0] * 5
+    sc = score_path(pnl, inv, beta, inv_lambda=0.0, beta_lambda=0.0, peer_pnl=peer_pnl)
+    bound = build_mm_state(
+        time=0.0, spot=100.0, option_mid=2.0, iv=0.28, inventory=0,
+        delta=0.2, gamma=0.02, vega=6.0, cash_pnl=0.0, half_spread=0.12, quoting_allowed=True,
+        latent={"enabled": 1.0, "constraint_active": 1.0, "instability": 0.0},
+    )
+    snap, source = _snapshot(bound, 0.0 if strategy == "desk" else 1.0)
+    return CaseRun(SPECS["constraint_gate"], strategy, sc, inv, beta, [snap], decision_source=source)
+
+
+def _gex_disagree(strategy: str, peer_pnl: float) -> CaseRun:
+    """Structural gamma is long. Today's signed flow is short. The path follows the flow."""
+    structural = 0.60
+    flow = -0.80
+    disagree = signs_disagree(structural, flow)
+    if strategy == "desk":
+        size = 0.40 if disagree else 1.0
+        pnl = -0.05 * size
+    else:
+        size = 1.15
+        pnl = -1.0 * 0.25 * size
+    inv = [size]
+    beta = [0.0]
+    sc = score_path(pnl, inv, beta, inv_lambda=0.0, beta_lambda=0.0, peer_pnl=peer_pnl)
+    state = build_mm_state(
+        time=0.0, spot=100.0, option_mid=2.0, iv=0.2, inventory=0,
+        delta=0.3, gamma=0.01, vega=5.0, cash_pnl=0.0, half_spread=0.12, quoting_allowed=True,
+        latent={"enabled": 1.0, "gex_disagree": 1.0 if disagree else 0.0},
+    )
+    snap, source = _snapshot(state, size)
+    snap["structural"] = structural
+    snap["flow"] = flow
+    return CaseRun(SPECS["gex_disagree"], strategy, sc, inv, beta, [snap], decision_source=source)
+
+
+def _tdf_threshold(strategy: str, peer_pnl: float) -> CaseRun:
+    """250 bp of drift trades back to 175 bp. The next equity leg mean-reverts."""
+    weight = 0.625
+    target = 0.60
+    trade = tdf_trade(weight, target, 1000.0) if strategy == "desk" else 0.0
+    rx = -0.02
+    pnl = trade * rx
+    inv = [abs(trade)]
+    beta = [0.0]
+    sc = score_path(pnl, inv, beta, inv_lambda=0.0, beta_lambda=0.0, peer_pnl=peer_pnl)
+    events = [
+        {
+            "type": "TdfThreshold",
+            "trade": trade,
+            "inside_band_trade": tdf_trade(0.61, 0.60, 1000.0),
+            "note": "200 bp trigger, 175 bp destination. A 100 bp drift is inside the band.",
+        }
+    ]
+    return CaseRun(SPECS["tdf_threshold"], strategy, sc, inv, beta, events)
+
+
+def _overwrite_roll(strategy: str, peer_pnl: float) -> CaseRun:
+    """Rich IV. Desk sells gen-3 cover. Naive skips the roll."""
+    if strategy == "desk":
+        coverage = gen3_coverage(0.28, 0.18)
+        premium = 1.50 * coverage
+        pnl = premium - 0.25 * premium
+    else:
+        coverage = 0.0
+        pnl = 0.0
+    inv = [coverage]
+    beta = [0.0]
+    sc = score_path(pnl, inv, beta, inv_lambda=0.0, beta_lambda=0.0, peer_pnl=peer_pnl)
+    events = [
+        {
+            "type": "OverwriteRoll",
+            "coverage": coverage,
+            "note": "Gen-3 cover = clip(0.50 + 2(IV - IV_ref)). Gen-1 would be full ATM notional.",
+        }
+    ]
+    return CaseRun(SPECS["overwrite_roll"], strategy, sc, inv, beta, events)
+
+
 def run_case(name: str, strategy: str = "desk", peer_pnl: float = 0.0) -> CaseRun:
     if name == "location_arb":
         run, _, _ = _location(strategy, peer_pnl)
@@ -612,6 +817,20 @@ def run_case(name: str, strategy: str = "desk", peer_pnl: float = 0.0) -> CaseRu
         return _dealer_gamma(strategy, peer_pnl)
     if name == "cot_fade":
         return _cot_fade(strategy, peer_pnl)
+    if name == "letf_day":
+        return _letf_day(strategy, peer_pnl)
+    if name == "instability_spike":
+        return _instability_spike(strategy, peer_pnl)
+    if name == "remaining_parent":
+        return _remaining_parent(strategy, peer_pnl)
+    if name == "constraint_gate":
+        return _constraint_gate(strategy, peer_pnl)
+    if name == "gex_disagree":
+        return _gex_disagree(strategy, peer_pnl)
+    if name == "tdf_threshold":
+        return _tdf_threshold(strategy, peer_pnl)
+    if name == "overwrite_roll":
+        return _overwrite_roll(strategy, peer_pnl)
     raise KeyError(name)
 
 

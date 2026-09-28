@@ -5,7 +5,7 @@
 **Scope:** Simulation / paper research only — no live exchange keys, no production routing  
 **Companion docs:** [ARCHITECTURE.md](./ARCHITECTURE.md), [SYSTEM_ONE_JEV.md](./SYSTEM_ONE_JEV.md), [LITERATURE_CANON.md](./LITERATURE_CANON.md) (citations mapped to modules), [TRAINING_CASES.md](./TRAINING_CASES.md), [FRONTIERS.md](./FRONTIERS.md)
 
-`0.5.0-zig-oom-citadel-lit` adds quoter mode `option_vega` (constant-vega inventory MM) and the training desk. `0.6.0-zig-flow-positioning` adds paper flow and positioning features (COT, signed tape, dealer gamma) that scale quotes and the hedge band when the caller turns them on. The canon file is the citation index; this brief stays the design narrative.
+`0.5.0-zig-oom-citadel-lit` adds quoter mode `option_vega` (constant-vega inventory MM) and the training desk. `0.6.0-zig-flow-positioning` adds paper flow and positioning features (COT, signed tape, dealer gamma) that scale quotes and the hedge band when the caller turns them on. `0.7.0-zig-state-os` adds the latent-state gate: instability `|F|/L_exec` and the forced-flow engines in [STATE_OS.md](./STATE_OS.md). The canon file is the citation index; this brief stays the design narrative.
 
 This brief consolidates **fetched** industry and academic sources into design principles for a professional equity-options MM research stack. Citations prefer pages actually retrieved; do not invent papers or URLs.
 
