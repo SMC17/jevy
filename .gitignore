@@ -27,6 +27,9 @@ zig/.zig-cache/
 *.jsonl
 artifacts/
 
+# Vendor tapes. Metrics live in docs/. Do not commit Databento bytes.
+data/local/
+
 # OS / editor
 .DS_Store
 *.swp
