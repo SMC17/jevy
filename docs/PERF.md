@@ -1,5 +1,22 @@
 # Performance — Zig hot path
 
+## 2026-09-29 — `1.1.0-zig-ortho` (one kernel, one run)
+
+`desk/residual_strip_k6_n128` is new. The number below is a single `zig build bench -Doptimize=ReleaseFast` invocation on this VM. It is not a six-run median or p95, and it does not replace the 2026-09-28 table or the 1.0 row.
+
+| Item | Recorded value |
+| --- | --- |
+| Date | 2026-09-29 |
+| Host | Linux x86_64, 4 cores |
+| CPU | `Intel(R) Xeon(R) Processor`, `/proc/cpuinfo` `cpu MHz` 2400.000, `cpu cores` 4 |
+| Frequency scaling | `/sys/devices/system/cpu/cpu0/cpufreq` is absent |
+| Toolchain | Zig 0.16.0 |
+| Build | `cd zig && zig build bench -Doptimize=ReleaseFast` |
+| Kernel | `desk/residual_strip_k6_n128`, 50_000 iterations, inner warmup `iters/20` |
+| Result | 2734.049 ns per call |
+
+The same process reprinted `desk/residual_strip_n256` at 2450.018 ns. The 1.0 note below recorded 2510.057 ns for that kernel in a different process. Do not swap the rows.
+
 ## 2026-09-29 — `1.0.0-zig-desk` (one kernel, one run)
 
 `desk/residual_strip_n256` is new. The number below is a single `zig build bench -Doptimize=ReleaseFast` invocation. It is not a six-run median or p95, and it does not replace the 2026-09-28 table.

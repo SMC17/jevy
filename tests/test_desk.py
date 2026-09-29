@@ -12,7 +12,7 @@ from jev_omm.decisions.client import DeterministicFallbackClient
 from jev_omm.decisions.policy import apply_desk_policy
 from jev_omm.decisions.schemas import build_desk_questions, build_mm_state
 from jev_omm.desk.allocator import TOXIC_SLEEVE_GOOD, TOXIC_SLEEVE_TOXIC, allocate, toxic_sleeve_weights
-from jev_omm.desk.fixtures import EXPIRIES, UNDERLIERS, fixture_rows, load_csv, render_csv
+from jev_omm.desk.fixtures import DEFAULT_PRODUCTS, EXPIRIES, UNDERLIERS, fixture_rows, load_csv, render_csv
 from jev_omm.desk.harness import DeskConfig, run_desk
 from jev_omm.desk.sleeves import SLEEVE_IDS, SleeveContext, flow_size_mult, quote_or_target
 from jev_omm.hedge.delta import greek_pnl_step
@@ -55,10 +55,11 @@ def _ctx(**kw) -> SleeveContext:
     return SleeveContext(**base)
 
 
-def test_fixture_is_labeled_synthetic_and_has_three_names():
+def test_fixture_is_labeled_synthetic_and_has_eight_names():
     rows = fixture_rows()
     ids = {r["underlier_id"] for r in rows}
-    assert ids == {"EQ_INDEX", "EQ_SINGLE", "FX_PAIR"}
+    assert ids == set(DEFAULT_PRODUCTS)
+    assert len(ids) >= 8
     assert all(r["synthetic_fixture"] == 1 for r in rows)
     assert len(EXPIRIES) == 3
     text = render_csv(rows)
@@ -71,6 +72,7 @@ def test_fixture_is_labeled_synthetic_and_has_three_names():
 def test_fixture_slices_pass_calendar_and_differ_in_beta():
     betas = [UNDERLIERS[k].beta_to_index for k in ("EQ_INDEX", "EQ_SINGLE", "FX_PAIR")]
     assert betas == [1.0, 1.35, 0.15]
+    assert len({UNDERLIERS[k].beta_to_index for k in DEFAULT_PRODUCTS}) == len(DEFAULT_PRODUCTS)
     for spec in UNDERLIERS.values():
         ordered = [spec.slices[t] for t in sorted(spec.slices)]
         assert raw_calendar_ok(ordered[0], ordered[1])
@@ -257,7 +259,7 @@ def test_toxic_sleeve_training_case():
     assert abs(naive.score.absolute_pnl) < 1e-12
     ev = next(e for e in desk.events if e["type"] == "SleeveAllocator")
     assert ev["names"] == ["EQ_INDEX", "EQ_SINGLE"]
-    assert abs(ev["weight_mm_spread"] - 0.40) < 1e-9
+    assert abs(ev["weight_mm_spread"] - 0.35) < 1e-9
     assert ev["weight_flow_toxicity"] == 0.0
     assert ev["source"] == "fallback"
     assert ev["kill"] is True
@@ -271,8 +273,8 @@ def test_desk_harness_scoreboard():
     run = run_desk(DeskConfig(n_steps=48, seed=11, fit_stride=24, jev_desk=False))
     board = run.scoreboard
     assert board.synthetic_fixture == 1
-    assert board.products == ["EQ_INDEX", "EQ_SINGLE", "FX_PAIR"]
-    assert len(board.rows) == len(SLEEVE_IDS) >= 6
+    assert board.products == list(DEFAULT_PRODUCTS)
+    assert len(board.rows) == len(SLEEVE_IDS) >= 14
     assert run.n_fits >= 2
     assert set(run.book.underliers) == set(board.products)
     for uid, surface in run.book.underliers.items():
@@ -283,7 +285,7 @@ def test_desk_harness_scoreboard():
     assert board.weight_sum > 0.0
     for row in board.rows:
         assert 0.0 <= row.r2 <= 1.0 + 1e-9
-        assert row.weight <= 0.40 + 1e-9
+        assert row.weight <= 0.35 + 1e-9
         assert math.isfinite(row.residual_pnl)
     # Residual is orthogonal to the factors that were in the regression.
     for sleeve_id in SLEEVE_IDS:
@@ -299,7 +301,7 @@ def test_desk_harness_scoreboard():
         for j in range(i + 1, len(board.sleeve_ids)):
             rho = float(board.pearson[i, j])
             assert abs(rho - float(board.pearson[j, i])) < 1e-12
-            if abs(rho) > 0.50:
+            if abs(rho) > run.config.corr_cap:
                 assert (a, board.sleeve_ids[j]) in flagged
     # Turning a sleeve off is the identity: no PnL, no weight.
     jev = run_desk(DeskConfig(n_steps=8, seed=11, fit_stride=8, jev_desk=True))

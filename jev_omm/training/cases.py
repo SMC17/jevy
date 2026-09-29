@@ -42,6 +42,8 @@ CASES = (
     "tdf_threshold",
     "overwrite_roll",
     "toxic_sleeve",
+    "ortho_break",
+    "toxic_multi",
 )
 
 
@@ -803,7 +805,7 @@ def _toxic_sleeve(strategy: str, peer_pnl: float) -> CaseRun:
 
     The series match ``desk.allocator.TOXIC_SLEEVE_*`` and ``zig/src/desk.zig``.
     Naive is equal weight. Desk is inverse-vol with the correlation cap, the
-    loser cut, and the 0.40 concentration cap. The offline fallback is asked
+    loser cut, and the 0.35 concentration cap. The offline fallback is asked
     with the desk gate on; code applies the weight. The answer is not an order.
     """
     from jev_omm.desk.allocator import TOXIC_SLEEVE_GOOD, TOXIC_SLEEVE_TOXIC, toxic_sleeve_weights
@@ -811,7 +813,7 @@ def _toxic_sleeve(strategy: str, peer_pnl: float) -> CaseRun:
     good = list(TOXIC_SLEEVE_GOOD)
     toxic = list(TOXIC_SLEEVE_TOXIC)
     if strategy == "desk":
-        w_good, w_toxic = (float(x) for x in toxic_sleeve_weights(0.40))
+        w_good, w_toxic = (float(x) for x in toxic_sleeve_weights())
     else:
         w_good, w_toxic = 0.5, 0.5
     pnl = 0.0
@@ -865,6 +867,95 @@ def _toxic_sleeve(strategy: str, peer_pnl: float) -> CaseRun:
     return CaseRun(SPECS["toxic_sleeve"], strategy, sc, inv, beta, events, decision_source=desk_ans.source)
 
 
+def _ortho_break(strategy: str, peer_pnl: float) -> CaseRun:
+    """Two sleeves share one smile factor. The desk cuts the worse leg.
+
+    The fly series is an affine copy of the skew series with a negative
+    mean, so Pearson is 1. Naive holds both. The allocator, with the
+    correlation cap and no concentration cap on this lesson, drops the fly.
+    """
+    from jev_omm.desk.allocator import allocate
+
+    skew = [0.04, 0.02, 0.05, 0.03, 0.04, 0.03]
+    fly = [0.93 * x - 0.04 for x in skew]
+    if strategy == "desk":
+        w = allocate([skew, fly], [True, True], max_weight=1.0, corr_cap=0.35, sharpe_tilt=0.0)
+        w_skew, w_fly = float(w[0]), float(w[1])
+    else:
+        w_skew, w_fly = 0.5, 0.5
+    pnl = sum(w_skew * s + w_fly * f for s, f in zip(skew, fly))
+    state = build_mm_state(
+        time=0.0, spot=100.0, option_mid=1.0, iv=0.2, inventory=0,
+        delta=0.0, gamma=0.0, vega=0.0, cash_pnl=0.0, half_spread=0.2, quoting_allowed=True,
+    )
+    state["desk"] = {"enabled": 1.0 if strategy == "desk" else 0.0, "ortho_break": 1.0}
+    from jev_omm.decisions.policy import apply_desk_policy
+    from jev_omm.decisions.schemas import build_desk_questions
+
+    desk_ans = DeterministicFallbackClient().system_one(state, build_desk_questions())
+    adj = apply_desk_policy(desk_ans, state)
+    sc = score_path(pnl, [abs(w_skew), abs(w_fly)], [0.0], inv_lambda=0.0, beta_lambda=0.0, peer_pnl=peer_pnl)
+    events = [
+        {
+            "type": "OrthogonalityBreak",
+            "sleeves": ["skew_residual", "fly_butterfly"],
+            "weight_skew": w_skew,
+            "weight_fly": w_fly,
+            "merge": adj.merge,
+            "source": desk_ans.source,
+            "note": "Shared smile factor. The allocator drops the worse leg. Code sets the weight.",
+        }
+    ]
+    return CaseRun(SPECS["ortho_break"], strategy, sc, [abs(w_skew), abs(w_fly)], [0.0], events, decision_source=desk_ans.source)
+
+
+def _toxic_multi(strategy: str, peer_pnl: float) -> CaseRun:
+    """Three products. One sleeve is a negative clone of a better one.
+
+    Naive is equal weight. The desk cuts the clone and keeps the other two
+    under the concentration cap.
+    """
+    from jev_omm.desk.allocator import allocate
+
+    good = [0.03, 0.04, 0.02, 0.05, 0.03, 0.04]
+    other = [0.01, 0.02, 0.015, 0.012, 0.018, 0.016]
+    clone = [x - 0.07 for x in good]
+    series = [good, other, clone]
+    if strategy == "desk":
+        w = [float(x) for x in allocate(series, [True, True, True], sharpe_tilt=0.0)]
+    else:
+        w = [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]
+    pnl = 0.0
+    for step in zip(*series):
+        pnl += sum(wi * xi for wi, xi in zip(w, step))
+    state = build_mm_state(
+        time=0.0, spot=100.0, option_mid=1.0, iv=0.2, inventory=0,
+        delta=0.0, gamma=0.0, vega=0.0, cash_pnl=0.0, half_spread=0.2, quoting_allowed=True,
+    )
+    state["desk"] = {
+        "enabled": 1.0 if strategy == "desk" else 0.0,
+        "product_toxic": 1.0,
+        "names": ["EQ_INDEX", "EQ_SINGLE", "EQ_LOWBETA"],
+    }
+    from jev_omm.decisions.policy import apply_desk_policy
+    from jev_omm.decisions.schemas import build_desk_questions
+
+    desk_ans = DeterministicFallbackClient().system_one(state, build_desk_questions())
+    adj = apply_desk_policy(desk_ans, state)
+    sc = score_path(pnl, [abs(x) for x in w], [0.0], inv_lambda=0.0, beta_lambda=0.0, peer_pnl=peer_pnl)
+    events = [
+        {
+            "type": "ToxicMulti",
+            "names": ["EQ_INDEX", "EQ_SINGLE", "EQ_LOWBETA"],
+            "weights": w,
+            "product_kill": adj.product_kill,
+            "source": desk_ans.source,
+            "note": "Three synthetic names. The collinear loser is cut. Code sets the weight.",
+        }
+    ]
+    return CaseRun(SPECS["toxic_multi"], strategy, sc, [abs(x) for x in w], [0.0], events, decision_source=desk_ans.source)
+
+
 def run_case(name: str, strategy: str = "desk", peer_pnl: float = 0.0) -> CaseRun:
     if name == "location_arb":
         run, _, _ = _location(strategy, peer_pnl)
@@ -901,6 +992,10 @@ def run_case(name: str, strategy: str = "desk", peer_pnl: float = 0.0) -> CaseRu
         return _overwrite_roll(strategy, peer_pnl)
     if name == "toxic_sleeve":
         return _toxic_sleeve(strategy, peer_pnl)
+    if name == "ortho_break":
+        return _ortho_break(strategy, peer_pnl)
+    if name == "toxic_multi":
+        return _toxic_multi(strategy, peer_pnl)
     raise KeyError(name)
 
 
