@@ -41,6 +41,7 @@ CASES = (
     "gex_disagree",
     "tdf_threshold",
     "overwrite_roll",
+    "toxic_sleeve",
 )
 
 
@@ -797,6 +798,73 @@ def _overwrite_roll(strategy: str, peer_pnl: float) -> CaseRun:
     return CaseRun(SPECS["overwrite_roll"], strategy, sc, inv, beta, events)
 
 
+def _toxic_sleeve(strategy: str, peer_pnl: float) -> CaseRun:
+    """Two names, one sleeve collinear and toxic. Desk allocator cuts it.
+
+    The series match ``desk.allocator.TOXIC_SLEEVE_*`` and ``zig/src/desk.zig``.
+    Naive is equal weight. Desk is inverse-vol with the correlation cap, the
+    loser cut, and the 0.40 concentration cap. The offline fallback is asked
+    with the desk gate on; code applies the weight. The answer is not an order.
+    """
+    from jev_omm.desk.allocator import TOXIC_SLEEVE_GOOD, TOXIC_SLEEVE_TOXIC, toxic_sleeve_weights
+
+    good = list(TOXIC_SLEEVE_GOOD)
+    toxic = list(TOXIC_SLEEVE_TOXIC)
+    if strategy == "desk":
+        w_good, w_toxic = (float(x) for x in toxic_sleeve_weights(0.40))
+    else:
+        w_good, w_toxic = 0.5, 0.5
+    pnl = 0.0
+    for g, t in zip(good, toxic):
+        pnl += w_good * g + w_toxic * t
+    state = build_mm_state(
+        time=0.0,
+        spot=100.0,
+        option_mid=1.0,
+        iv=0.2,
+        inventory=0,
+        delta=0.0,
+        gamma=0.0,
+        vega=0.0,
+        cash_pnl=0.0,
+        half_spread=0.2,
+        quoting_allowed=True,
+    )
+    state["desk"] = {
+        "enabled": 1.0 if strategy == "desk" else 0.0,
+        "sleeve_toxic": 1.0,
+        "names": ["EQ_INDEX", "EQ_SINGLE"],
+    }
+    result = DeterministicFallbackClient().system_one(state, build_mm_questions())
+    # The desk battery is a second question map. Identity when the gate is off.
+    from jev_omm.decisions.policy import apply_desk_policy
+    from jev_omm.decisions.schemas import build_desk_questions
+
+    desk_ans = DeterministicFallbackClient().system_one(state, build_desk_questions())
+    adj = apply_desk_policy(desk_ans, state)
+    inv = [abs(w_good), abs(w_toxic)]
+    beta = [0.0]
+    sc = score_path(pnl, inv, beta, inv_lambda=0.0, beta_lambda=0.0, peer_pnl=peer_pnl)
+    events = [
+        {
+            "type": "SleeveAllocator",
+            "names": ["EQ_INDEX", "EQ_SINGLE"],
+            "sleeves": ["mm_spread", "flow_toxicity"],
+            "weight_mm_spread": w_good,
+            "weight_flow_toxicity": w_toxic,
+            "source": desk_ans.source,
+            "kill_noul": float(desk_ans.answers["kill_sleeve"].noul),
+            "sleeve_weight": desk_ans.answers["sleeve_weight"].choice,
+            "weight_mult": adj.weight_mult,
+            "kill": adj.kill,
+            "reason": adj.reason,
+            "mm_source": result.source,
+            "note": "Choice and Noul only. Code sets the weight. Two synthetic names.",
+        }
+    ]
+    return CaseRun(SPECS["toxic_sleeve"], strategy, sc, inv, beta, events, decision_source=desk_ans.source)
+
+
 def run_case(name: str, strategy: str = "desk", peer_pnl: float = 0.0) -> CaseRun:
     if name == "location_arb":
         run, _, _ = _location(strategy, peer_pnl)
@@ -831,6 +899,8 @@ def run_case(name: str, strategy: str = "desk", peer_pnl: float = 0.0) -> CaseRu
         return _tdf_threshold(strategy, peer_pnl)
     if name == "overwrite_roll":
         return _overwrite_roll(strategy, peer_pnl)
+    if name == "toxic_sleeve":
+        return _toxic_sleeve(strategy, peer_pnl)
     raise KeyError(name)
 
 

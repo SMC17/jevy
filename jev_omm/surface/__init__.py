@@ -4,6 +4,7 @@
 - `ParametricIVSurface`: labeled PLACEHOLDER toy smile (skew/smile in log-m).
 """
 
+from jev_omm.surface.book import SurfaceBook
 from jev_omm.surface.parametric import ParametricIVSurface
 from jev_omm.surface.sabr import SabrIVSurface, SabrIVSurfacePythonFallback, hagan_sabr_iv
 from jev_omm.surface.svi import SviParams, SsviParams, calibrate
@@ -16,4 +17,5 @@ __all__ = [
     "SviParams",
     "SsviParams",
     "calibrate",
+    "SurfaceBook",
 ]

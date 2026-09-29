@@ -218,6 +218,24 @@ SPECS: dict[str, CaseSpec] = {
         lesson="Roll the cover when IV is rich. Skipping the roll leaves the premium on the table.",
         citation="https://www.cboe.com/us/indices/dashboard/bxm/",
     ),
+    "toxic_sleeve": CaseSpec(
+        name="toxic_sleeve",
+        role="multi-name sleeve allocator",
+        information_set=[
+            "two sleeves on two synthetic names",
+            "residual PnL of each sleeve",
+            "pairwise residual correlation",
+        ],
+        constraints=[
+            "paper only",
+            "correlation cap 0.50",
+            "concentration cap 0.40",
+            "a negative residual sleeve correlated with a better sleeve is cut",
+            "the decision answer is not an order",
+        ],
+        lesson="Two names, one sleeve toxic and collinear. Equal weight keeps the loser. The allocator zeros it and caps what remains.",
+        citation="https://doi.org/10.1093/rfs/hhn039",
+    ),
 }
 
 

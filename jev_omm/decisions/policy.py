@@ -135,6 +135,38 @@ def apply_policy(result: SystemOneResult, state: Optional[dict[str, Any]] = None
     )
 
 
+class DeskAdjustments:
+    """Code-side map of the desk battery. Not an order."""
+
+    def __init__(self, weight_mult: float = 1.0, kill: bool = False, reason: str = "identity") -> None:
+        self.weight_mult = float(weight_mult)
+        self.kill = bool(kill)
+        self.reason = reason
+
+
+def apply_desk_policy(result: SystemOneResult, state: Optional[dict[str, Any]] = None) -> DeskAdjustments:
+    """Map sleeve_weight / kill_sleeve onto a multiplier.
+
+    When ``desk.enabled`` is off, the result is the identity (multiplier 1,
+    kill false) even if the answers say otherwise. The model does not emit
+    an order; the caller decides whether a zero weight means flat risk.
+    """
+    desk = (state or {}).get("desk") or {}
+    if float(desk.get("enabled", 0.0)) < 0.5:
+        return DeskAdjustments(1.0, False, "identity")
+    kill_n = _noul(result, "kill_sleeve")
+    choice, _conf = _choice(result, "sleeve_weight", "hold")
+    mult = {"cut": 0.25, "hold": 1.0, "boost": 1.25}.get(choice, 1.0)
+    kill = kill_n >= 0.70
+    reason = "desk"
+    if kill:
+        mult = 0.0
+        reason = "kill_sleeve"
+    elif choice != "hold":
+        reason = f"sleeve_weight:{choice}"
+    return DeskAdjustments(mult, kill, reason)
+
+
 def decide_quote_adjustments(
     client: DecisionClient,
     *,

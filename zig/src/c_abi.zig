@@ -14,6 +14,7 @@ const parity = @import("parity.zig");
 const combos = @import("combos.zig");
 const hedge = @import("hedge.zig");
 const scenario = @import("scenario.zig");
+const desk = @import("desk.zig");
 
 pub const CGreeks = extern struct {
     delta: f64,
@@ -967,7 +968,28 @@ export fn jev_omm_evaluate_risk_ext(
     }
 }
 
+export fn jev_omm_residual_strip(
+    n: usize,
+    r: [*]const f64,
+    f_beta: [*]const f64,
+    f_gamma: [*]const f64,
+    f_vega: [*]const f64,
+    use_vega: i32,
+    out_resid: [*]f64,
+    out_beta: *f64,
+    out_gamma: *f64,
+    out_vega: *f64,
+    out_r2: *f64,
+) callconv(.c) void {
+    const vega: ?[]const f64 = if (use_vega != 0) f_vega[0..n] else null;
+    const fit = desk.stripResidual(r[0..n], f_beta[0..n], f_gamma[0..n], vega, out_resid[0..n]);
+    out_beta.* = fit.beta;
+    out_gamma.* = fit.gamma_coef;
+    out_vega.* = fit.vega_coef;
+    out_r2.* = fit.r2;
+}
+
 export fn jev_omm_version() callconv(.c) [*:0]const u8 {
-    return "0.8.0-zig-evidence";
+    return "1.0.0-zig-desk";
 }
 

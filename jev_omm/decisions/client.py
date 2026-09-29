@@ -378,6 +378,31 @@ class DeterministicFallbackClient(DecisionClient):
         size_probs = {k: v / ss for k, v in size_probs.items()}
 
         legend = {str(i): lvl for i, lvl in enumerate(TOXICITY_LEVELS)}
+        asked = questions or {}
+        desk_answers: dict[str, Any] = {}
+        if "sleeve_weight" in asked or "kill_sleeve" in asked:
+            desk = state.get("desk") or {}
+            desk_on = float(desk.get("enabled", 0.0)) >= 0.5
+            toxic_sleeve = desk_on and float(desk.get("sleeve_toxic", 0.0)) >= 0.5
+            surface_hot = desk_on and float(desk.get("surface_rmse", 0.0)) >= 0.02
+            if not desk_on:
+                weight_choice, weight_conf, kill_noul = "hold", 0.90, 0.0
+            elif toxic_sleeve:
+                weight_choice, weight_conf, kill_noul = "cut", 0.84, 0.86
+            elif surface_hot:
+                weight_choice, weight_conf, kill_noul = "cut", 0.72, 0.40
+            else:
+                weight_choice, weight_conf, kill_noul = "hold", 0.80, 0.05
+            weight_probs = {k: 0.08 for k in ("cut", "hold", "boost")}
+            weight_probs[weight_choice] = max(0.55, weight_conf)
+            ws = sum(weight_probs.values())
+            weight_probs = {k: v / ws for k, v in weight_probs.items()}
+            desk_answers = {
+                "sleeve_weight": ChoiceAnswer(
+                    choice=weight_choice, probabilities=weight_probs, confidence=weight_conf
+                ),
+                "kill_sleeve": NoulAnswer(noul=kill_noul),
+            }
         answers = {
             "regime": ChoiceAnswer(choice=regime, probabilities=regime_probs, confidence=regime_conf),
             "toxicity": ScoreAnswer(
@@ -390,6 +415,7 @@ class DeterministicFallbackClient(DecisionClient):
             "size_tier": ChoiceAnswer(choice=size_tier, probabilities=size_probs, confidence=size_conf),
             "surface_suspect": NoulAnswer(noul=surface_suspect),
         }
+        answers.update(desk_answers)
         return SystemOneResult(model=model, answers=answers, source="fallback")
 
 
