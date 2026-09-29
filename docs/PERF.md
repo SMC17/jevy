@@ -1,5 +1,22 @@
 # Performance — Zig hot path
 
+## 2026-09-29 — `1.0.0-zig-desk` (one kernel, one run)
+
+`desk/residual_strip_n256` is new. The number below is a single `zig build bench -Doptimize=ReleaseFast` invocation. It is not a six-run median or p95, and it does not replace the 2026-09-28 table.
+
+| Item | Recorded value |
+| --- | --- |
+| Date | 2026-09-29 |
+| Host | Linux x86_64, 4 cores |
+| CPU | `Intel(R) Xeon(R) Processor`, `/proc/cpuinfo` `cpu MHz` 2400.000, `cpu cores` 4 |
+| Frequency scaling | `/sys/devices/system/cpu/cpu0/cpufreq` is absent |
+| Toolchain | Zig 0.16.0 |
+| Build | `cd zig && zig build bench -Doptimize=ReleaseFast` |
+| Kernel | `desk/residual_strip_n256`, 50_000 iterations, inner warmup `iters/20` |
+| Result | 2510.057 ns per call |
+
+The same binary reprinted the older kernels. Those reprints are a different process from the 0.9.0 six-run table. Do not swap them in.
+
 ## 2026-09-28 — `0.9.0-zig-falsify` (microbenchmarks)
 
 These numbers are single-process kernel microbenchmarks. They are not a quote-to-trade latency, not a p99 of a running engine, and not a market-making result.
