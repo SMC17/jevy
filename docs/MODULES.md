@@ -20,6 +20,16 @@ European Black–Scholes–Merton analytic price + delta/gamma/vega/theta.
 
 **Real today**, including vanna (\(\partial^2V/\partial S\partial\sigma\)) and volga (\(\partial^2V/\partial\sigma^2\)). **Upgrade:** American (tree/PDE), local vol, Heston, dividend schedules, discrete cash dividends; rho greek export.
 
+## `desk/` (`1.0.0-zig-desk`)
+
+Paper multi-product book. `SurfaceBook` in `surface/book.py` fits raw SVI per underlier and expiry, runs the existing butterfly and calendar gates, and damps a calendar break instead of quoting through it. Eight sleeves in `desk/sleeves.py` (`mm_spread`, `skew_residual`, `calendar_term`, `fly_butterfly`, `vrp_varswap`, `flow_toxicity`, `gex_forced`, `parity_box`) each expose a target, a risk budget, greeks, and a PnL stream. `enabled=False` is a zero target. Flow and the instability gate stay at multiplier 1 when `gates_on` is false.
+
+`pnl/residual.py` and `zig/src/desk.zig` strip index beta and the greek gamma and vega buckets. The residual keeps the intercept. `desk/allocator.py` is inverse-vol with a 0.50 correlation shrink, a cut of the worse leg of a collinear pair, and a 0.40 concentration cap. The scoreboard and the seed-11 correlation table are in [ablation_sleeve_corr.md](./ablation_sleeve_corr.md). Write-ups: [SURFACE_DESK.md](./SURFACE_DESK.md), [SLEEVES.md](./SLEEVES.md), [RESIDUAL_PNL.md](./RESIDUAL_PNL.md).
+
+The fixture `data/fixtures/surfaces_synthetic.csv` is labeled `synthetic_fixture=1`. It is not an OPRA tape.
+
+Optional desk questions `sleeve_weight` and `kill_sleeve` are a separate System One map. The offline fallback answers `hold` and kill-noul 0 when `desk.enabled` is off. Jev still does not emit an order.
+
 ## `surface/`
 
 | Impl | Role |
@@ -129,6 +139,8 @@ spread capture vs adverse selection (1/5/30-step markout) vs inventory MTM.
 Rich-friendly run summary + attribution table in demos.
 
 Greek P&L explain landed in `hedge.greekPnlStep` / event-log `GreekPnl` + `HedgeFill`.
+
+`pnl/residual.py` projects sleeve PnL on the index return and on those gamma and vega buckets. Formulas: [RESIDUAL_PNL.md](./RESIDUAL_PNL.md).
 
 **Upgrade:** structured logging, metrics export.
 
