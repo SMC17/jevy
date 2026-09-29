@@ -1,9 +1,9 @@
 # Residual PnL
 
-**Version:** `1.0.0-zig-desk`  
-**Code:** `jev_omm/pnl/residual.py`, `zig/src/desk.zig` (`stripResidual`), `jev_omm/hedge/delta.py` (`greek_pnl_step`).
+**Version:** `1.1.0-zig-ortho`  
+**Code:** `jev_omm/pnl/residual.py` (`strip_residual`, `strip_factors`), `zig/src/desk.zig` (`stripResidual`, `stripResidualFactors`), `jev_omm/hedge/delta.py` (`greek_pnl_step`).
 
-The research object is the sleeve's period PnL after the comovement with spot and with the greek buckets has been removed. Raw PnL is still reported. A strip that does not explain the variance is reported with a low R². The default seed does that for `flow_toxicity` (R² 0.012).
+The research object is the sleeve's period PnL after the comovement with spot and with the greek buckets has been removed. Raw PnL is still reported. A strip that does not explain the variance is reported with a low R².
 
 ## Factors
 
@@ -14,10 +14,17 @@ Let `r_t` be the sleeve's raw PnL on step `t`, already after the research fee (`
 | Beta `f_β` | Index simple return `ΔS_index / S_index` | the equity factor, not the sleeve's own delta |
 | Gamma `f_Γ` | `greek_pnl_step` gamma bucket `0.5 Γ (ΔS)²` | `hedge.greekPnlStep` |
 | Vega `f_ν` | `ν Δσ`, optional | the vega bucket in the same step |
+| Volga | `0.5 * volga * (Δσ)²`, when `extended_strip` | the volga term booked by `book_higher_greeks` |
+| Vanna | `vanna * product return * Δσ` | the same |
+| Variance | quadratic variation of product returns, Gram–Schmidt against that sleeve's spot-gamma column | a convexity column that is not a second copy of gamma |
 
-In the harness, `ΔS` passed into the greek step is the product simple return (research units, S = 1). That is `0.5 Γ S² (ΔS/S)²` at S = 1. Gamma and vega factors are summed across products inside the sleeve, because that is the book's greek PnL. Beta is the single index return, shared by every sleeve.
+`strip_residual` is the three-column path (beta, gamma, optional vega). `strip_factors` takes up to six columns, C ABI `jev_omm_residual_strip_k`. The old `jev_omm_residual_strip` export is unchanged. Column order on the desk is beta, spot-gamma, vega (or a zero column if vega is off), volga, vanna, variance.
+
+In the harness, `ΔS` passed into the greek step is the product simple return (research units, S = 1). That is `0.5 Γ S² (ΔS/S)²` at S = 1. Greek factors are summed across products inside the sleeve. Beta is the single index return, shared by every sleeve.
 
 Theta is inside raw PnL and is not a regression column. It stays in the residual.
+
+The pairwise gate runs after this strip. It can put a sleeve's residual back onto another sleeve's leftover, which is not orthogonal to this sleeve's greek columns. The harness strips the same columns a second time, keeps the intercept, and if a pair climbs back over the 0.40 gate it repeats, up to four passes. The published residual is that series. The R² on the scoreboard row is the first strip of raw PnL.
 
 ## Slopes and the residual
 
@@ -26,7 +33,7 @@ Slopes come from least squares on **demeaned** factors, with ridge `1e-12` on th
 The stored residual does not subtract the intercept:
 
 ```
-r_resid = r − β̂ f_β − γ̂ f_Γ − ν̂ f_ν
+r_resid = r − β̂ f_β − γ̂ f_Γ − ν̂ f_ν − (volga, vanna, variance terms when the six-column strip is on)
 ```
 
 So `mean(r_resid)` is the intercept: average PnL after the average factor contribution. A constant premium is not eaten by a through-origin fit. A through-origin fit was tried and rejected here because a nonzero factor mean soaks up the constant and the slopes move. The worked example below is the case that shows it.
@@ -52,9 +59,9 @@ Recovered slopes: `β̂ ≈ 0.500`, `γ̂ ≈ 1.000`, `ν̂ ≈ 0.250`. Mean res
 
 Gamma on a one-step check: `Γ = 0.04`, `ΔS = 2` gives `0.5 * 0.04 * 4 = 0.08`, equal to `greek_pnl_step`.
 
-## What the desk run actually did
+## What the 1.0 desk run did
 
-Default config: seed 11, 80 steps, three synthetic names, eight sleeves, vega included. Full table in [ablation_sleeve_corr.md](./ablation_sleeve_corr.md).
+That config was seed 11, 80 steps, three synthetic names, eight sleeves, vega included, no volga or vanna column. Full table in [ablation_sleeve_corr.md](./ablation_sleeve_corr.md). The readings below are that historical sample.
 
 | Sleeve | R² | Reading on this sample |
 | --- | --- | --- |
@@ -69,6 +76,21 @@ Default config: seed 11, 80 steps, three synthetic names, eight sleeves, vega in
 
 Per-step Sharpe is `mean / sample std` of the residual. It is not annualized. Multiplying by `√252` would invent a track record. These are 80 synthetic days.
 
-## Headline versus weights
+## Headline versus weights (1.0 sample)
 
 Residual Sharpe ranks `mm_spread`, then the fly and the skew, then the calendar. The allocator's largest weight is `parity_box` at the 0.40 cap, because its residual volatility is the lowest and the cap then binds. Both facts are on the scoreboard. The desk residual PnL on this seed is 0.152 against raw 0.048, with per-step residual Sharpe 0.64 and residual max drawdown 0.0067. That is one synthetic path.
+
+## What the 1.1 strip changes on the same seed
+
+Eight products, twenty sleeves, six-column strip, seed 11, 80 steps. The full weight table is in the ablation. Readings that the extra columns and the convexity split actually move:
+
+| Sleeve | R² | Reading on this sample |
+| --- | --- | --- |
+| `calendar_term` | 0.960 | Still mostly vega. The extra columns do not create a term residual. |
+| `flow_toxicity` | 0.636 | The 1.0 R² was 0.012. Higher-greek booking and the hardened flow path put variance into the strip. What remains is a smooth spread, per-step residual Sharpe 10.65. That is the sample mean over a small sample std. It is not an annualized result. |
+| `mm_spread` | 0.587 | Inventory gamma is hedged down. Residual Sharpe per step is 2.37. Weight 0.116, not the cap. |
+| `vrp_varswap` | 0.025 | The premium is no longer the squared spot move, so the strip explains little. Weight 0.0017. Correlation with `mm_spread` on this seed is +0.108, and the fifteen-path mean is +0.018. |
+| `fly_butterfly` | 0.099 | Curvature is its own draw. Correlation with skew on this seed is +0.027. The 1.0 figure was 0.930. |
+| `charm_bleed` | 0.004 | Almost none of the weekend bleed is in the greek columns. Weight 0.091, per-step residual Sharpe 1.80. |
+
+R² above 0.70 means most of the variance sits in the factor strip. R² under 0.15 means the strip is not the story. Both sentences are on the scoreboard when they apply. The desk residual PnL on this path is 4.143 against raw 0.814, per-step residual Sharpe 6.57, residual max drawdown 0. The Sharpe is the flow sleeve plus a few quiet positive means. One synthetic path.

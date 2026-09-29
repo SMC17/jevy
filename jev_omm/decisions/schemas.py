@@ -261,6 +261,36 @@ def build_desk_questions() -> dict[str, dict[str, Any]]:
                 "Is the implied-vol fit inconsistent enough that the surface should be treated as suspect?"
             ),
         ),
+        "merge_sleeve": ChoiceQuestion(
+            instructions=(
+                "Do these two sleeves share one factor that should be merged into a single risk budget? "
+                "This choice is not an order."
+            ),
+            criteria={
+                "keep": "Leave the sleeves as separate budgets",
+                "merge": "Treat them as one factor and drop the weaker sleeve",
+            },
+        ),
+        "cut_corr_pair": NoulQuestion(
+            instructions=(
+                "Is the residual correlation high enough that code should cut one leg of the pair? "
+                "A yes is a flag. It is not an order."
+            ),
+            criteria={
+                "true": "The pair is one factor wearing two names",
+                "false": "The pair can stay in the book",
+            },
+        ),
+        "product_kill": NoulQuestion(
+            instructions=(
+                "Should code drop one synthetic product from the desk for this step? "
+                "A yes is a flag. It is not an order."
+            ),
+            criteria={
+                "true": "The product is toxic or redundant enough to drop",
+                "false": "Keep the product in the book",
+            },
+        ),
     }
     return {k: v.model_dump(exclude_none=True) for k, v in questions.items()}
 

@@ -20,7 +20,10 @@ const hedge = @import("hedge.zig");
 const types = @import("types.zig");
 
 pub const RIDGE: f64 = 1e-12;
-pub const MAX_SLEEVES: usize = 8;
+pub const MAX_SLEEVES: usize = 24;
+pub const MAX_FACTORS: usize = 6;
+const TILT_CAP: f64 = 3.0;
+const FLAT_STD: f64 = 1e-5;
 
 pub const StripResult = struct {
     beta: f64 = 0.0,
@@ -164,6 +167,123 @@ pub fn stripResidual(
     };
 }
 
+fn solveInto(a: *[MAX_FACTORS][MAX_FACTORS]f64, b: *[MAX_FACTORS]f64, n: usize) void {
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        var piv = i;
+        var best = @abs(a[i][i]);
+        var r: usize = i + 1;
+        while (r < n) : (r += 1) {
+            const v = @abs(a[r][i]);
+            if (v > best) {
+                best = v;
+                piv = r;
+            }
+        }
+        if (piv != i) {
+            var c: usize = 0;
+            while (c < n) : (c += 1) {
+                const tmp = a[i][c];
+                a[i][c] = a[piv][c];
+                a[piv][c] = tmp;
+            }
+            const tb = b[i];
+            b[i] = b[piv];
+            b[piv] = tb;
+        }
+        const diag = a[i][i];
+        if (@abs(diag) < 1e-18) continue;
+        var r2: usize = i + 1;
+        while (r2 < n) : (r2 += 1) {
+            const f = a[r2][i] / diag;
+            var c2: usize = i;
+            while (c2 < n) : (c2 += 1) a[r2][c2] -= f * a[i][c2];
+            b[r2] -= f * b[i];
+        }
+    }
+    var k = n;
+    while (k > 0) {
+        k -= 1;
+        var s = b[k];
+        var c3: usize = k + 1;
+        while (c3 < n) : (c3 += 1) s -= a[k][c3] * b[c3];
+        if (@abs(a[k][k]) < 1e-18) b[k] = 0 else b[k] = s / a[k][k];
+    }
+}
+
+/// OLS on demeaned columns. ``factors`` is column-major: factor j lives at
+/// ``factors[j * n + t]``. At most ``MAX_FACTORS`` columns. The intercept
+/// stays in the residual. Same ridge and R² as ``stripResidual``.
+pub fn stripResidualFactors(
+    r: []const f64,
+    n_factors: usize,
+    factors: []const f64,
+    out_resid: []f64,
+    out_coef: []f64,
+) StripResult {
+    const n = r.len;
+    const k = @min(n_factors, MAX_FACTORS);
+    if (n == 0 or out_resid.len != n or factors.len < k * n or k == 0) return .{};
+    const nf: f64 = @floatFromInt(n);
+    const mean_r = meanOf(r);
+    var means: [MAX_FACTORS]f64 = .{0} ** MAX_FACTORS;
+    var j: usize = 0;
+    while (j < k) : (j += 1) {
+        var s: f64 = 0;
+        var t: usize = 0;
+        while (t < n) : (t += 1) s += factors[j * n + t];
+        means[j] = s / nf;
+    }
+    var xtx: [MAX_FACTORS][MAX_FACTORS]f64 = .{.{0} ** MAX_FACTORS} ** MAX_FACTORS;
+    var xty: [MAX_FACTORS]f64 = .{0} ** MAX_FACTORS;
+    j = 0;
+    while (j < k) : (j += 1) {
+        var dot_yr: f64 = 0;
+        var t: usize = 0;
+        while (t < n) : (t += 1) dot_yr += factors[j * n + t] * r[t];
+        xty[j] = dot_yr - nf * means[j] * mean_r;
+        var i: usize = 0;
+        while (i < k) : (i += 1) {
+            var dot_ij: f64 = 0;
+            t = 0;
+            while (t < n) : (t += 1) dot_ij += factors[j * n + t] * factors[i * n + t];
+            xtx[j][i] = dot_ij - nf * means[j] * means[i];
+        }
+        xtx[j][j] += RIDGE;
+    }
+    solveInto(&xtx, &xty, k);
+    var jj: usize = 0;
+    while (jj < out_coef.len and jj < k) : (jj += 1) out_coef[jj] = xty[jj];
+    var ss_res: f64 = 0;
+    var sum_e: f64 = 0;
+    var t: usize = 0;
+    while (t < n) : (t += 1) {
+        var yhat: f64 = 0;
+        var c: usize = 0;
+        while (c < k) : (c += 1) yhat += xty[c] * factors[c * n + t];
+        const e = r[t] - yhat;
+        out_resid[t] = e;
+        sum_e += e;
+    }
+    const mean_e = sum_e / nf;
+    var ss_tot: f64 = 0;
+    t = 0;
+    while (t < n) : (t += 1) {
+        const d = r[t] - mean_r;
+        ss_tot += d * d;
+        const er = out_resid[t] - mean_e;
+        ss_res += er * er;
+    }
+    const r2: f64 = if (ss_tot > 1e-18) 1.0 - ss_res / ss_tot else 0.0;
+    return .{
+        .beta = if (k > 0) xty[0] else 0,
+        .gamma_coef = if (k > 1) xty[1] else 0,
+        .vega_coef = if (k > 2) xty[2] else 0,
+        .r2 = r2,
+        .n_factors = k,
+    };
+}
+
 pub fn pearson(a: []const f64, b: []const f64) f64 {
     if (a.len != b.len or a.len < 2) return 0.0;
     const n: f64 = @floatFromInt(a.len);
@@ -189,27 +309,30 @@ pub fn pearson(a: []const f64, b: []const f64) f64 {
     return cov / (@sqrt(va) * @sqrt(vb));
 }
 
-fn meanStd(x: []const f64) struct { mean: f64, std: f64 } {
-    if (x.len == 0) return .{ .mean = 0, .std = 1 };
+fn meanStd(x: []const f64) struct { mean: f64, std: f64, raw: f64 } {
+    if (x.len == 0) return .{ .mean = 0, .std = 1, .raw = 0 };
     var s: f64 = 0;
     for (x) |v| s += v;
     const m = s / @as(f64, @floatFromInt(x.len));
-    if (x.len < 2) return .{ .mean = m, .std = 1 };
+    if (x.len < 2) return .{ .mean = m, .std = 1, .raw = 0 };
     var ss: f64 = 0;
     for (x) |v| {
         const d = v - m;
         ss += d * d;
     }
     const variance = ss / @as(f64, @floatFromInt(x.len - 1));
-    var stdv = @sqrt(@max(variance, 0));
+    const raw = @sqrt(@max(variance, 0));
+    var stdv = raw;
     if (stdv < 1e-8) stdv = 1e-8;
-    return .{ .mean = m, .std = stdv };
+    return .{ .mean = m, .std = stdv, .raw = raw };
 }
 
 /// Inverse-vol weights on residual PnL.
 ///
 /// 1. Sample standard deviation (n−1). Disabled sleeves stay at weight 0.
-/// 2. Raw weight ∝ 1/σ.
+///    σ < 1e-5 (no residual variance) gets raw weight 0.
+/// 2. Raw weight ∝ (1 + sharpe_tilt * max(Sharpe, 0)) / σ. The tilt
+///    multiplier is capped at 3. Sharpe uses the unfloored σ.
 /// 3. For each enabled pair with |ρ| > `corr_cap`, multiply both raw weights
 ///    by `corr_cap/|ρ|` (pairs compound).
 /// 4. A sleeve with negative residual mean is cut to 0 when another enabled
@@ -223,6 +346,7 @@ pub fn allocateInverseVol(
     enabled: []const bool,
     max_weight: f64,
     corr_cap: f64,
+    sharpe_tilt: f64,
     out_w: []f64,
 ) void {
     const n = @min(resid.len, out_w.len);
@@ -239,7 +363,16 @@ pub fn allocateInverseVol(
         const ms = meanStd(resid[i]);
         means[i] = ms.mean;
         rho[i][i] = 1;
-        if (on[i]) inv[i] = 1.0 / ms.std;
+        if (on[i] and ms.raw >= FLAT_STD) {
+            var sharpe = ms.mean / ms.raw;
+            if (sharpe < 0.0) sharpe = 0.0;
+            var boost = 1.0 + sharpe_tilt * sharpe;
+            if (boost > TILT_CAP) boost = TILT_CAP;
+            // Negative residual mean is down-weighted. The hard zero is the
+            // correlated-loser cut below.
+            if (ms.mean < 0.0) boost *= 0.25;
+            inv[i] = boost / ms.std;
+        }
     }
     i = 0;
     while (i < m) : (i += 1) {
@@ -345,9 +478,54 @@ test "toxic sleeve allocator cuts the correlated loser and caps the rest" {
     const series = [_][]const f64{ &good, &toxic };
     const enabled = [_]bool{ true, true };
     var w: [2]f64 = .{ 0, 0 };
-    allocateInverseVol(series[0..], &enabled, 0.40, 0.50, &w);
+    allocateInverseVol(series[0..], &enabled, 0.40, 0.50, 0.0, &w);
     try std.testing.expectApproxEqAbs(w[0], 0.40, 1e-12);
     try std.testing.expectApproxEqAbs(w[1], 0.0, 1e-12);
+}
+
+test "k-factor strip matches the three-factor kernel and keeps the constant" {
+    const fb = [_]f64{ 0.01, -0.02, 0.015, 0.0, -0.01, 0.008 };
+    const fg = [_]f64{ 0.001, 0.004, 0.0002, 0.003, 0.0015, 0.0004 };
+    const fv = [_]f64{ 0.10, -0.20, 0.0, 0.05, -0.04, 0.02 };
+    const fo = [_]f64{ 0.02, 0.01, -0.03, 0.04, -0.01, 0.0 };
+    var cols: [24]f64 = undefined;
+    var t: usize = 0;
+    while (t < 6) : (t += 1) {
+        cols[t] = fb[t];
+        cols[6 + t] = fg[t];
+        cols[12 + t] = fv[t];
+        cols[18 + t] = fo[t];
+    }
+    var r: [6]f64 = undefined;
+    t = 0;
+    while (t < 6) : (t += 1) {
+        r[t] = 0.5 * fb[t] + 1.0 * fg[t] + 0.25 * fv[t] + 0.1 * fo[t] + 0.01;
+    }
+    var resid: [6]f64 = undefined;
+    var coef: [4]f64 = .{ 0, 0, 0, 0 };
+    const fit = stripResidualFactors(&r, 4, &cols, &resid, &coef);
+    try std.testing.expectApproxEqAbs(0.5, coef[0], 1e-5);
+    try std.testing.expectApproxEqAbs(1.0, coef[1], 1e-5);
+    try std.testing.expectApproxEqAbs(0.25, coef[2], 1e-5);
+    try std.testing.expectApproxEqAbs(0.1, coef[3], 1e-5);
+    try std.testing.expect(fit.r2 > 0.99);
+    var mean_e: f64 = 0;
+    for (resid) |e| mean_e += e;
+    mean_e /= 6.0;
+    try std.testing.expectApproxEqAbs(0.01, mean_e, 1e-5);
+}
+
+test "sharpe tilt raises the higher-sharpe sleeve" {
+    const calm = [_]f64{ 0.02, 0.01, 0.03, 0.015, 0.025, 0.02 };
+    const jumpy = [_]f64{ 0.08, -0.04, 0.07, -0.05, 0.09, -0.02 };
+    const series = [_][]const f64{ &calm, &jumpy };
+    const enabled = [_]bool{ true, true };
+    var plain: [2]f64 = .{ 0, 0 };
+    var tilted: [2]f64 = .{ 0, 0 };
+    allocateInverseVol(series[0..], &enabled, 1.0, 0.99, 0.0, &plain);
+    allocateInverseVol(series[0..], &enabled, 1.0, 0.99, 1.0, &tilted);
+    try std.testing.expect(tilted[0] > plain[0]);
+    try std.testing.expectApproxEqAbs(tilted[0] + tilted[1], 1.0, 1e-9);
 }
 
 test "disabled sleeve stays at weight zero" {
@@ -356,7 +534,7 @@ test "disabled sleeve stays at weight zero" {
     const series = [_][]const f64{ &a, &b };
     const enabled = [_]bool{ true, false };
     var w: [2]f64 = .{ -1, -1 };
-    allocateInverseVol(series[0..], &enabled, 1.0, 0.50, &w);
+    allocateInverseVol(series[0..], &enabled, 1.0, 0.50, 0.0, &w);
     try std.testing.expectApproxEqAbs(w[0], 1.0, 1e-12);
     try std.testing.expectApproxEqAbs(w[1], 0.0, 1e-12);
 }

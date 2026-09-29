@@ -232,6 +232,22 @@ On seed 11 the skew sleeve and the fly sleeve still print residual Pearson 0.93,
 
 Desk Choice / Noul questions (`sleeve_weight`, `kill_sleeve`) are offline-only and are the identity when `desk.enabled` is off. They do not emit orders.
 
+## 6e. Orthogonal multi-product desk (`1.1.0-zig-ortho`)
+
+```
+independent smile and convexity factors
+        → greek strip (beta, gamma, vega, volga, vanna, variance)
+        → pairwise gate (residualize, or merge if |ρ| ≥ √0.5)
+        → strip again so the residual stays orthogonal to the factors
+        → inverse-vol, shrink at 0.35, cap at 0.35
+```
+
+Eight synthetic products (`EQ_INDEX`, `EQ_SINGLE`, `EQ_LOWBETA`, `FX_PAIR`, `FX_EM`, `COMMO_ENERGY`, `RATES_STIR`, `CRYPTO_BETA`). Twenty sleeves: the 1.0 eight, plus wing, sticky regime, dispersion, roll yield, charm, vanna, queue, COT fade, autocall warehouse, funding-versus-box, hub cross-impact, and a rough-vol stress path. New sleeves that would have reloaded beta or vega were rewritten or restricted to one product. See [ORTHOGONALITY.md](./ORTHOGONALITY.md) and [SLEEVES.md](./SLEEVES.md).
+
+On the fifteen-path grid (five seeds, three regimes, 80 steps) no residual pair has mean `|ρ|` above 0.25. The 1.0 failures, 0.93 and 0.63, reprint under `legacy_config()` and fall to about 0.02 and 0.02 as means after the split. Seed 11 can still print `|ρ|` 0.36 on `roll_yield` / `vanna_tilt`, under the gate and over the shrink. The flow sleeve's per-step residual Sharpe on the full book is a smooth synthetic spread. It is not an annualized track record.
+
+Extra offline questions: `merge_sleeve`, `cut_corr_pair`, `product_kill`. Identity when `desk.enabled` is off. They do not emit orders. The k-factor strip is `jev_omm_residual_strip_k`. The three-factor export is unchanged.
+
 ## 6c. Evidence pass (`0.8.0-zig-evidence`)
 
 No new warehouse or engine. The simulator's primary fill path is the existing LOB stepper; Poisson is `fill_model=poisson`. Finite-horizon A–S uses rolling `T − t`. Hedges update position, cash, slippage, and marked PnL. Optional risk limits (notional, per-strike, quotes outstanding) are no-ops until set. Checked-in synthetic ablation, numerical self-checks, and a Jev paper scoreboard are under `docs/`. They are not a live track record.
