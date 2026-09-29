@@ -7,6 +7,7 @@ from jev_omm.pnl.markout import (
     spread_edge,
     DEFAULT_HORIZONS,
 )
+from jev_omm.pnl.residual import StripFit, strip_residual
 
 __all__ = [
     "marked_pnl",
@@ -14,4 +15,6 @@ __all__ = [
     "MarkoutTracker",
     "spread_edge",
     "DEFAULT_HORIZONS",
+    "StripFit",
+    "strip_residual",
 ]

@@ -262,6 +262,26 @@ fn doHawkesIntensity(i: usize) f64 {
     return hawkes.intensity(p, t, &ev) + hawkes.excitation(p, t, &ev);
 }
 
+const desk_k = root.desk;
+
+fn doResidualStrip(i: usize) f64 {
+    var r: [256]f64 = undefined;
+    var fb: [256]f64 = undefined;
+    var fg: [256]f64 = undefined;
+    var fv: [256]f64 = undefined;
+    var out: [256]f64 = undefined;
+    var k: usize = 0;
+    while (k < 256) : (k += 1) {
+        const x = @as(f64, @floatFromInt((i + k) % 17)) * 0.01;
+        fb[k] = x - 0.08;
+        fg[k] = x * x;
+        fv[k] = @as(f64, @floatFromInt(k % 9)) * 0.02 - 0.08;
+        r[k] = 0.4 * fb[k] + 1.1 * fg[k] + 0.2 * fv[k] + 0.01;
+    }
+    const fit = desk_k.stripResidual(&r, &fb, &fg, &fv, &out);
+    return fit.r2 + fit.beta + out[i % 256];
+}
+
 fn doTrainingLocation(i: usize) f64 {
     _ = i;
     const naive = training.runCase("location_arb", .naive, 0.0);
@@ -303,4 +323,5 @@ pub fn main() void {
     benchOne("option_mm/solve_and_quote_grid21x20", 2_000, &doOptionMmSolveQuote);
     benchOne("hawkes/intensity_8_events", 500_000, &doHawkesIntensity);
     benchOne("training/location_arb_pair", 2_000, &doTrainingLocation);
+    benchOne("desk/residual_strip_n256", 50_000, &doResidualStrip);
 }
