@@ -989,7 +989,24 @@ export fn jev_omm_residual_strip(
     out_r2.* = fit.r2;
 }
 
+export fn jev_omm_residual_strip_k(
+    n: usize,
+    k: usize,
+    r: [*]const f64,
+    factors: [*]const f64,
+    out_resid: [*]f64,
+    out_coef: [*]f64,
+    out_r2: *f64,
+) callconv(.c) void {
+    const kk = @min(k, desk.MAX_FACTORS);
+    var coef: [desk.MAX_FACTORS]f64 = .{0} ** desk.MAX_FACTORS;
+    const fit = desk.stripResidualFactors(r[0..n], kk, factors[0 .. kk * n], out_resid[0..n], coef[0..kk]);
+    var i: usize = 0;
+    while (i < kk) : (i += 1) out_coef[i] = coef[i];
+    out_r2.* = fit.r2;
+}
+
 export fn jev_omm_version() callconv(.c) [*:0]const u8 {
-    return "1.0.0-zig-desk";
+    return "1.1.0-zig-ortho";
 }
 

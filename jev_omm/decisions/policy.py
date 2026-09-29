@@ -138,10 +138,19 @@ def apply_policy(result: SystemOneResult, state: Optional[dict[str, Any]] = None
 class DeskAdjustments:
     """Code-side map of the desk battery. Not an order."""
 
-    def __init__(self, weight_mult: float = 1.0, kill: bool = False, reason: str = "identity") -> None:
+    def __init__(
+        self,
+        weight_mult: float = 1.0,
+        kill: bool = False,
+        reason: str = "identity",
+        merge: bool = False,
+        product_kill: bool = False,
+    ) -> None:
         self.weight_mult = float(weight_mult)
         self.kill = bool(kill)
         self.reason = reason
+        self.merge = bool(merge)
+        self.product_kill = bool(product_kill)
 
 
 def apply_desk_policy(result: SystemOneResult, state: Optional[dict[str, Any]] = None) -> DeskAdjustments:
@@ -156,15 +165,24 @@ def apply_desk_policy(result: SystemOneResult, state: Optional[dict[str, Any]] =
         return DeskAdjustments(1.0, False, "identity")
     kill_n = _noul(result, "kill_sleeve")
     choice, _conf = _choice(result, "sleeve_weight", "hold")
+    merge_choice, _mconf = _choice(result, "merge_sleeve", "keep")
+    cut_pair = _noul(result, "cut_corr_pair")
+    product_n = _noul(result, "product_kill")
     mult = {"cut": 0.25, "hold": 1.0, "boost": 1.25}.get(choice, 1.0)
     kill = kill_n >= 0.70
+    merge = merge_choice == "merge" or cut_pair >= 0.70
+    product_kill = product_n >= 0.70
     reason = "desk"
     if kill:
         mult = 0.0
         reason = "kill_sleeve"
+    elif merge:
+        reason = "merge_sleeve"
+    elif product_kill:
+        reason = "product_kill"
     elif choice != "hold":
         reason = f"sleeve_weight:{choice}"
-    return DeskAdjustments(mult, kill, reason)
+    return DeskAdjustments(mult, kill, reason, merge=merge, product_kill=product_kill)
 
 
 def decide_quote_adjustments(

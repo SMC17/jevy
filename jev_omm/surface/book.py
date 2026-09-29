@@ -237,6 +237,44 @@ class SurfaceBook:
             return 0.0
         return 0.5 * (float(np.mean(call)) - float(np.mean(put)))
 
+    def dupire_front_local_var(self, underlier_id: str) -> float:
+        """ATM local variance between the first two listed expiries.
+
+        Gatheral form σ_loc² = ∂_T w / g(k) at k = 0. A flat slice has g = 1.
+        Returns NaN when the book cannot support the difference. Research
+        stress hook only — not a local-vol book.
+        """
+        from jev_omm.surface.dupire import local_variance_from_total
+
+        u = self.underliers.get(underlier_id)
+        if u is None or len(u.slices) < 2:
+            return math.nan
+        expiries = sorted(u.slices)
+        near = u.slices[expiries[0]]
+        far = u.slices[expiries[1]]
+        dt = far.expiry_years - near.expiry_years
+        if not (dt > 0.0):
+            return math.nan
+        w0 = total_var(near.params, 0.0)
+        w1 = total_var(far.params, 0.0)
+        return local_variance_from_total(0.0, w0, 0.0, 0.0, (w1 - w0) / dt)
+
+    def sticky_atm_gap(self, underlier_id: str, expiry_years: float, spot_now: float) -> float | None:
+        """ATM implied vol under sticky-delta minus sticky-strike, after a spot move."""
+        u = self.underliers.get(underlier_id)
+        if u is None or u.spot is None or not (u.spot > 0.0) or not (spot_now > 0.0):
+            return None
+        sl = u.slices.get(expiry_years)
+        if sl is None or sl.forward is None:
+            return None
+        strike = sl.forward
+        fwd_now = spot_now * math.exp((u.rate - u.div_yield) * expiry_years)
+        strike_iv = self.mark_iv(underlier_id, expiry_years, strike, fwd_now, StickyRegime.STICKY_STRIKE)
+        delta_iv = self.mark_iv(underlier_id, expiry_years, strike, fwd_now, StickyRegime.STICKY_DELTA)
+        if strike_iv is None or delta_iv is None:
+            return None
+        return float(delta_iv - strike_iv)
+
     def fly_residual(self, underlier_id: str, expiry_years: float, wing: float = 0.30) -> float:
         """Wing average residual minus the ATM residual. Curvature vs the fit."""
         sl = self._slice(underlier_id, expiry_years)
@@ -285,14 +323,19 @@ def quotes_from_svi(
     ks: list[float],
     skew: float = 0.0,
     fly: float = 0.0,
+    wing: float = 0.0,
     iv_noise: float = 0.0,
 ) -> list[QuotePoint]:
-    """Build labeled synthetic mids. ``skew`` and ``fly`` are vol-point bumps."""
+    """Build labeled synthetic mids.
+
+    ``skew`` is a slope bump, ``fly`` is curvature (k²), ``wing`` is a far-wing
+    kurtosis bump (k⁴). All three are vol points on a synthetic quote.
+    """
     if not (forward > 0.0) or not (expiry_years > 0.0):
         return []
     out: list[QuotePoint] = []
     for k in ks:
-        iv = implied_vol(params, k, expiry_years) + skew * k + fly * k * k + iv_noise
+        iv = implied_vol(params, k, expiry_years) + skew * k + fly * k * k + wing * (k ** 4) + iv_noise
         iv = max(iv, 1e-4)
         out.append(
             QuotePoint(

@@ -1,13 +1,19 @@
 """Synthetic multi-underlier surface fixtures.
 
-Three names, three smiles, three betas to the equity index. Every row is
-``synthetic_fixture=1``. These are not OPRA prints and not a licensed tape.
+Eight names, distinct betas and smiles. Every row is ``synthetic_fixture=1``.
+These are not OPRA prints and not a licensed tape. ``CRYPTO_BETA`` is a
+fake high-vol path, not a coin.
 
 Shapes (research labels):
 
 - ``EQ_INDEX`` — equity index, beta 1, negative skew
-- ``EQ_SINGLE`` — single name, beta 1.35, steeper skew and a higher wing
+- ``EQ_SINGLE`` — single name, beta 1.35, steeper skew
+- ``EQ_LOWBETA`` — defensive single name, beta 0.42
 - ``FX_PAIR`` — a currency pair, beta 0.15, a near-symmetric smile
+- ``FX_EM`` — higher-vol EM FX smile, beta 0.55
+- ``COMMO_ENERGY`` — energy smile plus a seasonality stub, beta 0.28
+- ``RATES_STIR`` — short-rate vol, beta 0.06
+- ``CRYPTO_BETA`` — synthetic high-vol beta 1.70
 """
 
 from __future__ import annotations
@@ -40,6 +46,7 @@ class UnderlierSpec:
     iv0: float
     slices: dict[float, SviParams]
     synthetic_fixture: int = 1
+    season_amp: float = 0.0
 
 
 def _slices(rho: float, b: float, a0: float, sigma: float) -> dict[float, SviParams]:
@@ -90,7 +97,75 @@ UNDERLIERS: dict[str, UnderlierSpec] = {
         iv0=0.09,
         slices=_slices(rho=-0.05, b=0.04, a0=0.0015, sigma=0.16),
     ),
+    "EQ_LOWBETA": UnderlierSpec(
+        underlier_id="EQ_LOWBETA",
+        asset_class="equity_single",
+        beta_to_index=0.42,
+        spot=90.0,
+        rate=0.04,
+        div_yield=0.028,
+        idio_vol=0.006,
+        iv0=0.14,
+        slices=_slices(rho=-0.22, b=0.045, a0=0.0028, sigma=0.16),
+    ),
+    "FX_EM": UnderlierSpec(
+        underlier_id="FX_EM",
+        asset_class="fx_em",
+        beta_to_index=0.55,
+        spot=18.5,
+        rate=0.08,
+        div_yield=0.06,
+        idio_vol=0.011,
+        iv0=0.18,
+        slices=_slices(rho=-0.28, b=0.07, a0=0.0045, sigma=0.24),
+    ),
+    "COMMO_ENERGY": UnderlierSpec(
+        underlier_id="COMMO_ENERGY",
+        asset_class="commodity",
+        beta_to_index=0.28,
+        spot=75.0,
+        rate=0.04,
+        div_yield=0.0,
+        idio_vol=0.014,
+        iv0=0.32,
+        slices=_slices(rho=-0.12, b=0.09, a0=0.010, sigma=0.20),
+        season_amp=0.04,
+    ),
+    "RATES_STIR": UnderlierSpec(
+        underlier_id="RATES_STIR",
+        asset_class="rates",
+        beta_to_index=0.06,
+        spot=96.5,
+        rate=0.045,
+        div_yield=0.0,
+        idio_vol=0.003,
+        iv0=0.07,
+        slices=_slices(rho=0.08, b=0.025, a0=0.0008, sigma=0.12),
+    ),
+    "CRYPTO_BETA": UnderlierSpec(
+        underlier_id="CRYPTO_BETA",
+        asset_class="crypto_synthetic",
+        beta_to_index=1.70,
+        spot=40.0,
+        rate=0.0,
+        div_yield=0.0,
+        idio_vol=0.028,
+        iv0=0.62,
+        slices=_slices(rho=-0.30, b=0.11, a0=0.020, sigma=0.28),
+    ),
 }
+
+
+DEFAULT_PRODUCTS: tuple[str, ...] = (
+    "EQ_INDEX",
+    "EQ_SINGLE",
+    "EQ_LOWBETA",
+    "FX_PAIR",
+    "FX_EM",
+    "COMMO_ENERGY",
+    "RATES_STIR",
+    "CRYPTO_BETA",
+)
 
 
 def forward(spec: UnderlierSpec, expiry_years: float) -> float:
