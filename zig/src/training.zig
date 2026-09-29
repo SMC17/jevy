@@ -18,6 +18,7 @@
 //!  14. gex_disagree — do not pin when flow-signed gamma disagrees.
 //!  15. tdf_threshold — 200 bp trigger, 175 bp destination.
 //!  16. overwrite_roll — sell gen-3 cover when IV is rich.
+//!  17. toxic_sleeve — two names, one collinear loser. Allocator cuts it.
 //!
 //! Article (the `/p/` path 404s; this is the live URL):
 //!   https://www.predictingalpha.com/blogs/what-i-learned-from-citadels-training-software
@@ -31,6 +32,7 @@ const lob = @import("lob.zig");
 const flow = @import("flow_signals.zig");
 const positioning = @import("positioning.zig");
 const state_os = @import("state_os.zig");
+const desk_k = @import("desk.zig");
 
 pub const Strategy = enum(u8) { naive = 0, desk = 1, predatory = 2 };
 
@@ -534,6 +536,24 @@ fn overwriteRoll(strategy: Strategy, peer_pnl: f64) CaseScore {
     return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
 }
 
+fn toxicSleeve(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const good = [_]f64{ 0.03, 0.04, 0.02, 0.05, 0.03, 0.04 };
+    const toxic = [_]f64{ -0.04, -0.03, -0.05, -0.02, -0.04, -0.03 };
+    var pnl: f64 = 0.0;
+    if (strategy == .desk) {
+        const series = [_][]const f64{ &good, &toxic };
+        const enabled = [_]bool{ true, true };
+        var w: [2]f64 = .{ 0, 0 };
+        desk_k.allocateInverseVol(series[0..], &enabled, 0.40, 0.50, &w);
+        for (good, toxic) |g, t| pnl += w[0] * g + w[1] * t;
+    } else {
+        for (good, toxic) |g, t| pnl += 0.5 * g + 0.5 * t;
+    }
+    const inv = [_]f64{0.0};
+    const beta = [_]f64{0.0};
+    return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
+}
+
 pub fn runCase(name: []const u8, strategy: Strategy, peer_pnl: f64) CaseScore {
     if (std.mem.eql(u8, name, "location_arb")) return location(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "pm_fair_value")) return pmFair(strategy, peer_pnl);
@@ -551,6 +571,7 @@ pub fn runCase(name: []const u8, strategy: Strategy, peer_pnl: f64) CaseScore {
     if (std.mem.eql(u8, name, "gex_disagree")) return gexDisagree(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "tdf_threshold")) return tdfThreshold(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "overwrite_roll")) return overwriteRoll(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "toxic_sleeve")) return toxicSleeve(strategy, peer_pnl);
     return .{};
 }
 
@@ -571,6 +592,7 @@ pub const CASES = [_][]const u8{
     "gex_disagree",
     "tdf_threshold",
     "overwrite_roll",
+    "toxic_sleeve",
 };
 
 test "location arb sim cannot hedge; futures overlay leaves basis risk" {
@@ -665,6 +687,15 @@ fn deskBeatsNaive(name: []const u8) !void {
     const desk = runCase(name, .desk, naive.absolute_pnl);
     try std.testing.expect(desk.risk_adjusted > naive.risk_adjusted);
     try std.testing.expect(desk.absolute_pnl > naive.absolute_pnl);
+}
+
+test "toxic sleeve allocator cuts the loser" {
+    const naive = runCase("toxic_sleeve", .naive, 0.0);
+    const desk = runCase("toxic_sleeve", .desk, naive.absolute_pnl);
+    try std.testing.expectApproxEqAbs(naive.absolute_pnl, 0.0, 1e-12);
+    try std.testing.expect(desk.absolute_pnl > naive.absolute_pnl);
+    try std.testing.expect(desk.risk_adjusted > naive.risk_adjusted);
+    try std.testing.expectApproxEqAbs(desk.absolute_pnl, 0.084, 1e-9);
 }
 
 test "state-os cases: the desk policy beats the naive one" {

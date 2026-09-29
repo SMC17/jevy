@@ -137,6 +137,16 @@ Same score as the earlier cases. The desk policy is code. A Decision snapshot, w
 
 Tests: `test_state_os_training_cases_teach_the_gate`, Zig `state-os cases: the desk policy beats the naive one`.
 
+## 17. `toxic_sleeve` (`1.0.0-zig-desk`)
+
+**Role:** sleeve allocator across two synthetic names.  
+**Information:** residual series for `mm_spread` and a collinear toxic sleeve, correlation cap 0.50, concentration cap 0.40.  
+**Lesson:** equal weight keeps a negative sleeve that is the same factor as a better one. The desk allocator zeros the worse leg and caps the survivor at 0.40. PnL on the fixed series is 0.084 versus 0 for the naive book.
+
+The offline fallback sees `desk.enabled`. Off, `sleeve_weight` is `hold` and `kill_sleeve` is 0, and the policy multiplier stays 1. On, with the toxic flag, kill noul is above 0.70 and code sets the weight. The answer is not an order. Carr and Wu, Review of Financial Studies 2009, [doi:10.1093/rfs/hhn039](https://doi.org/10.1093/rfs/hhn039), is the variance-premium citation for the residual object. The allocator rule itself is the one in [SLEEVES.md](./SLEEVES.md).
+
+Tests: `test_toxic_sleeve_training_case`, Zig `toxic sleeve allocator cuts the loser`.
+
 ## What this is not
 
 - Not a multi-agent replica of other trainees. The relative score is against the naive policy on the same seed. Peer panic in `mm_inventory` is a scripted research path.
