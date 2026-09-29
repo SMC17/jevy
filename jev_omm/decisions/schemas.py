@@ -224,6 +224,47 @@ def build_mm_state(
     }
 
 
+SLEEVE_WEIGHT_CRITERIA: dict[str, str] = {
+    "cut": "Reduce this sleeve's risk weight",
+    "hold": "Leave the sleeve weight unchanged",
+    "boost": "Increase the sleeve weight",
+}
+
+
+def build_desk_questions() -> dict[str, dict[str, Any]]:
+    """Desk battery. Choice / Noul only. The model does not emit an order.
+
+    Ask these only when ``state["desk"]["enabled"]`` is on. The offline
+    fallback answers ``hold`` and kill-noul 0 when that flag is off, which
+    is the identity.
+    """
+    questions: dict[str, Question] = {
+        "sleeve_weight": ChoiceQuestion(
+            instructions=(
+                "Given the desk state, should this sleeve's risk weight be cut, held, or boosted? "
+                "This choice is not an order."
+            ),
+            criteria=SLEEVE_WEIGHT_CRITERIA,
+        ),
+        "kill_sleeve": NoulQuestion(
+            instructions=(
+                "Should code set this sleeve's weight to zero for the step? "
+                "A yes is a flag. It is not an order."
+            ),
+            criteria={
+                "true": "Sleeve is toxic or redundant enough that code should zero the weight",
+                "false": "Leave the sleeve in the allocator",
+            },
+        ),
+        "surface_suspect": NoulQuestion(
+            instructions=(
+                "Is the implied-vol fit inconsistent enough that the surface should be treated as suspect?"
+            ),
+        ),
+    }
+    return {k: v.model_dump(exclude_none=True) for k, v in questions.items()}
+
+
 def build_mm_questions() -> dict[str, dict[str, Any]]:
     """One parallel System One batch — atomic questions, composed in policy.py."""
     questions: dict[str, Question] = {

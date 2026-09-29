@@ -218,6 +218,20 @@ Optional dep: `typesafe-sdk` (never required for offline fallback tests).
 
 Python builds `S_t`, forced flow, executable liquidity, constraint level-sets, and clocks (`jev_omm/state_os/`). Zig multiplies a precomputed instability scalar into spread, size, and hedge urgency (`state_os.zig`). The multiplier is 1 when the flag is off. The offline fallback maps a high ratio, a binding constraint, a live parent, or a GEX sign disagreement onto Choice / Score / Noul. Full write-up: [STATE_OS.md](./STATE_OS.md).
 
+## 6d. Multi-product sleeve desk (`1.0.0-zig-desk`)
+
+```
+products × surfaces × sleeves × residual risk → portfolio + attribution
+```
+
+`SurfaceBook` holds per-underlier SVI slices (spot, forward, rate, dividend explicit; a missing spot stays missing). Butterfly and calendar gates are the existing SVI checks. A calendar failure damps the marked total variance up to the previous expiry.
+
+Eight paper sleeves share that book and keep separate PnL. Raw PnL and residual PnL are both on the scoreboard. Residual slopes are demeaned OLS on the index return and on `greekPnlStep`'s gamma and vega buckets. The intercept stays in the residual mean. The allocator is inverse-vol, with `|ρ| > 0.50` shrink, a cut of the worse collinear leg, and a 0.40 name cap.
+
+On seed 11 the skew sleeve and the fly sleeve still print residual Pearson 0.93, and the spread sleeve and the variance sleeve still print 0.63. Those pairs are flagged in [ablation_sleeve_corr.md](./ablation_sleeve_corr.md). The box and the flow sleeve sit apart from that. This is a synthetic fixture (`synthetic_fixture=1`), not a live surface.
+
+Desk Choice / Noul questions (`sleeve_weight`, `kill_sleeve`) are offline-only and are the identity when `desk.enabled` is off. They do not emit orders.
+
 ## 6c. Evidence pass (`0.8.0-zig-evidence`)
 
 No new warehouse or engine. The simulator's primary fill path is the existing LOB stepper; Poisson is `fill_model=poisson`. Finite-horizon A–S uses rolling `T − t`. Hedges update position, cash, slippage, and marked PnL. Optional risk limits (notional, per-strike, quotes outstanding) are no-ops until set. Checked-in synthetic ablation, numerical self-checks, and a Jev paper scoreboard are under `docs/`. They are not a live track record.
