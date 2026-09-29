@@ -63,6 +63,7 @@ class SimResult:
     event_count: int = 0
     fill_model: str = ""
     quoted_steps: int = 0
+    step_breach: list[bool] = field(default_factory=list)
     pnl_path: list[float] = field(default_factory=list)
     inventory_path: list[int] = field(default_factory=list)
     underlier_path: list[float] = field(default_factory=list)
@@ -133,6 +134,7 @@ def run_simulation(
             contract.is_call,
         )
         tracker.on_step(step, opt_mid)
+        step_breached = False
 
         if event_log is not None:
             event_log.append_underlying_tick(time, step, spot)
@@ -160,6 +162,7 @@ def run_simulation(
         )
         if not risk.quoting_allowed:
             result.breach_count += 1
+            step_breached = True
             if event_log is not None:
                 event_log.append_risk_breach(
                     time, step, risk.breach_reason or "risk_breach", pos.qty
@@ -231,6 +234,7 @@ def run_simulation(
             if not risk_q.quoting_allowed:
                 risk = risk_q
                 result.breach_count += 1
+                step_breached = True
                 quote = None
                 if event_log is not None:
                     event_log.append_risk_breach(
@@ -277,6 +281,7 @@ def run_simulation(
 
         if quote is not None:
             result.quoted_steps += 1
+        result.step_breach.append(step_breached)
 
         if adj.hedge_now:
             # Recompute net delta after fills. The underlier already held

@@ -1,8 +1,9 @@
-"""Synthetic walk-forward harness and the slot for a later OPRA/NBBO tape.
+"""Synthetic walk-forward harness and local CSV/Parquet tapes.
 
-No live vendor is stubbed. ``load_tape("synthetic")`` builds a GBM spot
-path. A local CSV with the documented columns can be read later. Names that
-look like a live OPRA/NBBO session are refused.
+``load_tape("synthetic")`` builds a GBM spot path. A local CSV or Parquet
+file is read by ``jev_omm.research.tape``. Live session URLs are refused.
+The checked-in file ``jev_omm/data/fixtures/tape_synthetic.csv`` is a
+synthetic schema fixture (``synthetic_fixture=1``), not an OPRA print.
 
 Fill-hazard calibration uses the seconds clock: λ(δ) = A exp(−k δ) with A
 in events per second and δ in price units. That A is not Guéant's
@@ -13,10 +14,7 @@ intensity and κ on the test window, and reported beside the quoter.
 
 from __future__ import annotations
 
-import csv
 import math
-from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 
@@ -25,46 +23,22 @@ from jev_omm.config import EngineConfig, MarketConfig, QuoterConfig, RiskConfig,
 from jev_omm.models.types import Side
 from jev_omm.quoter.gueant_ode import IntensityFit, IntensityObs, estimate_intensity
 from jev_omm.research.metrics import summarize_run
-
-TAPE_COLUMNS = ("time_seconds", "spot", "bid", "ask", "bid_sz", "ask_sz")
-
-_LIVE_MARKERS = ("opra://", "live-nbbo", "polygon.io", "databento", "cboe-live")
-
-
-@dataclass
-class Tape:
-    """Spot path plus an optional top of book. ``source`` is never a vendor."""
-
-    time_seconds: np.ndarray
-    spot: np.ndarray
-    source: str
-    bid: np.ndarray | None = None
-    ask: np.ndarray | None = None
+from jev_omm.research.tape import CORE_COLUMNS as TAPE_COLUMNS
+from jev_omm.research.tape import Tape, load_local, refuse_live
 
 
 def load_tape(spec: str, *, n_steps: int = 80, seed: int = 11, spot0: float = 100.0) -> Tape:
-    """Load a synthetic path or a local fixture CSV.
+    """Load a synthetic path or a local CSV/Parquet tape.
 
     ``spec="synthetic"`` draws a GBM on the trading-time clock.
     Anything else must be a filesystem path. Live vendor URLs are refused.
     This function does not invent OPRA prints.
     """
     key = spec.strip()
-    low = key.lower()
-    if any(mark in low for mark in _LIVE_MARKERS):
-        raise RuntimeError(
-            "Live OPRA/NBBO is not wired. Use spec='synthetic' or a local CSV "
-            f"with columns {','.join(TAPE_COLUMNS)}."
-        )
+    refuse_live(key)
     if key == "synthetic":
         return synthetic_spot_tape(n_steps=n_steps, seed=seed, spot0=spot0)
-    path = Path(key)
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"No tape at {spec}. Historical OPRA/NBBO fixtures are not bundled; "
-            "place a licensed CSV locally or use spec='synthetic'."
-        )
-    return _read_csv_tape(path)
+    return load_local(key)
 
 
 def synthetic_spot_tape(*, n_steps: int, seed: int, spot0: float, dt_seconds: float = 60.0) -> Tape:
@@ -81,25 +55,6 @@ def synthetic_spot_tape(*, n_steps: int, seed: int, spot0: float, dt_seconds: fl
         spots[i] = spot
         times[i] = (i + 1) * dt_seconds
     return Tape(time_seconds=times, spot=spots, source="synthetic")
-
-
-def _read_csv_tape(path: Path) -> Tape:
-    with path.open(newline="") as handle:
-        reader = csv.DictReader(handle)
-        fields = reader.fieldnames or []
-        missing = [c for c in TAPE_COLUMNS if c not in fields]
-        if missing:
-            raise ValueError(f"{path} missing columns {missing}; expected {list(TAPE_COLUMNS)}")
-        rows = list(reader)
-    if not rows:
-        raise ValueError(f"{path} has a header and no rows")
-    return Tape(
-        time_seconds=np.array([float(r["time_seconds"]) for r in rows]),
-        spot=np.array([float(r["spot"]) for r in rows]),
-        bid=np.array([float(r["bid"]) for r in rows]),
-        ask=np.array([float(r["ask"]) for r in rows]),
-        source=f"csv:{path.name}",
-    )
 
 
 def _base_sim(**overrides: object) -> SimConfig:
@@ -340,9 +295,12 @@ def render_ablation_markdown(rows: list[dict[str, object]] | None = None, wf: di
         "divided by the hard delta limit. Feature packs are the existing flow, "
         "GEX, and instability scalers; `off` is the identity. `fixed_spread` "
         "is Avellaneda–Stoikov with γ = 0 and the half-spread clamped to 0.25.\n\n"
-        "A later licensed OPRA/NBBO fixture should be a CSV with columns "
-        "`time_seconds,spot,bid,ask,bid_sz,ask_sz` passed to `load_tape`. "
-        "No such file is shipped, and live vendor URLs are refused.\n\n"
+        "A schema-compatible synthetic fixture is checked in at "
+        "`jev_omm/data/fixtures/tape_synthetic.csv` with `synthetic_fixture=1`. "
+        "Those prices are invented. A licensed CSV or Parquet with columns "
+        "`time_seconds,spot,bid,ask,bid_sz,ask_sz` (spot optional when bid and "
+        "ask are present) is passed to `load_tape`. Live vendor URLs are refused. "
+        "See `docs/DATA.md` and `docs/ablation_real_or_fixture.md`.\n\n"
     )
     head = "| " + " | ".join(_COLUMNS) + " |\n"
     sep = "| " + " | ".join("---" for _ in _COLUMNS) + " |\n"

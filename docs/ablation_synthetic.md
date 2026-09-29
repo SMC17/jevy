@@ -4,7 +4,7 @@ Research laboratory output. The tape is a seeded GBM plus a Poisson touch fill (
 
 Markout columns are 1 / 5 / 30 **simulator steps** (here, minutes), not exchange seconds. `fill_rate` is fill events per step and can exceed 1 when both sides trade. `greek_utilization` is mean absolute net delta divided by the hard delta limit. Feature packs are the existing flow, GEX, and instability scalers; `off` is the identity. `fixed_spread` is Avellaneda–Stoikov with γ = 0 and the half-spread clamped to 0.25.
 
-A later licensed OPRA/NBBO fixture should be a CSV with columns `time_seconds,spot,bid,ask,bid_sz,ask_sz` passed to `load_tape`. No such file is shipped, and live vendor URLs are refused.
+A schema-compatible synthetic fixture is checked in at `jev_omm/data/fixtures/tape_synthetic.csv` with `synthetic_fixture=1`. Those prices are invented. A licensed CSV or Parquet with columns `time_seconds,spot,bid,ask,bid_sz,ask_sz` (spot optional when bid and ask are present) is passed to `load_tape`. Live vendor URLs are refused. See `docs/DATA.md` and `docs/ablation_real_or_fixture.md`.
 
 | label | pnl | fill_rate | realized_spread | markout_1 | markout_5 | markout_30 | hedge_cost | inventory_variance | max_drawdown | quote_uptime | greek_utilization | n_fills | n_hedges |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

@@ -1,12 +1,57 @@
 # Performance — Zig hot path
 
+## 2026-09-28 — `0.9.0-zig-falsify` (microbenchmarks)
+
+These numbers are single-process kernel microbenchmarks. They are not a quote-to-trade latency, not a p99 of a running engine, and not a market-making result.
+
+| Item | Recorded value |
+| --- | --- |
+| Date | 2026-09-28 |
+| Host | Linux x86_64, KVM guest |
+| CPU | `Intel(R) Xeon(R) Processor`, family 6, model 207, stepping 2, 4 cores, `/proc/cpuinfo` reports `cpu MHz` 2400.000 |
+| Frequency scaling | `/sys/devices/system/cpu/cpu0/cpufreq` is absent, so the governor was not readable. The MHz field above is what the guest exported. |
+| Toolchain | Zig 0.16.0 |
+| Build | `cd zig && zig build -Doptimize=ReleaseFast` |
+| Binary | `zig/zig-out/bin/jev_omm_bench` |
+| Clock | `CLOCK_MONOTONIC` inside the bench |
+| Inner loop | Each kernel discards `iters/20` calls, then reports the mean nanoseconds of the timed loop. Inputs are volatile so the compiler cannot delete the work. |
+| Repeats | 6 process invocations. Run 0 is cold (first execution of that binary in the sequence). Runs 1–5 are warm. |
+| Statistics | Median, p95, and p99 are of the five warm per-run means. With five samples, p95 and p99 are linear interpolations of the upper order statistics, close to the slowest warm run. They are not percentiles of individual iterations. |
+
+The bench binary was already built before run 0; "cold" is the first execution (page faults and first touch), not a rebuild. The inner `iters/20` warmup still runs on every invocation, including the cold one.
+
+| kernel | cold ns | warm median | warm p95 | warm p99 |
+| --- | --- | --- | --- | --- |
+| `bs_greeks/price_and_greeks_atm_call` | 72.122 | 72.190 | 72.263 | 72.269 |
+| `bs_greeks/price_and_greeks_batch_64` | 4455.798 | 4457.322 | 4843.677 | 4920.750 |
+| `quote_cycle/bs_risk_as_quote` | 90.150 | 89.792 | 89.936 | 89.958 |
+| `quote_cycle/quote_cycle_x256` | 22281.997 | 22293.767 | 22317.756 | 22321.002 |
+| `surface/sabr_iv_single` | 23.846 | 23.761 | 23.771 | 23.771 |
+| `surface/sabr_iv_batch_64` | 1504.419 | 1504.682 | 1505.557 | 1505.688 |
+| `gueant/make_quote` | 103.362 | 103.310 | 103.522 | 103.548 |
+| `multi_strike/quote_strip_5` | 892.565 | 896.042 | 905.102 | 906.676 |
+| `parity/box_spread` | 12.222 | 12.220 | 12.288 | 12.302 |
+| `combos/straddle_theo` | 119.212 | 119.297 | 120.695 | 120.931 |
+| `hedge/propose_apply_greek_pnl` | 2.596 | 2.595 | 2.649 | 2.659 |
+| `scenario/matrix_7x5` | 251.776 | 252.932 | 253.300 | 253.354 |
+| `surface/svi_iv_and_density_g` | 7.698 | 7.693 | 7.699 | 7.700 |
+| `gueant/ode_offsets_q8_200steps` | 130437.471 | 130679.294 | 131508.513 | 131608.411 |
+| `term/aggregate_3_expiries` | 131.937 | 132.001 | 132.125 | 132.128 |
+| `option_mm/solve_and_quote_grid21x20` | 11796.203 | 11787.725 | 11799.012 | 11799.601 |
+| `hawkes/intensity_8_events` | 127.426 | 127.648 | 128.097 | 128.176 |
+| `training/location_arb_pair` | 444.240 | 442.611 | 444.705 | 445.113 |
+
+`bs_greeks/price_and_greeks_batch_64` has a warm p95 far above the median because one of the five warm runs was slower (about 4940 ns versus about 4457 ns). That run is in the table. Do not quote the median alone.
+
+The rows below this section are the 2026-09-26 log from `0.5.0` / `0.7.0`. They are not the 0.9 measurement.
+
 **Measured:** 2026-09-26  
 **Host:** Linux x86_64 (cloud agent VM)  
 **Toolchain:** Zig 0.16.0 (`$HOME/zig-0.16/zig`, official tarball https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz)  
 **Command:** `cd zig && zig build bench -Doptimize=ReleaseFast`  
 **Clock:** `CLOCK_MONOTONIC`  
 **Note:** Inputs varied each iteration (volatile) to defeat dead-code elimination.  
-**Version of the table below:** `0.5.0` / `0.7.0` microbenchmarks, not re-run for `0.8.0-zig-evidence`.
+**Version of the historical table below:** `0.5.0` / `0.7.0` microbenchmarks. The citable 0.9 block is the one above.
 
 ## Methodology (read this before quoting a number)
 
@@ -21,7 +66,7 @@ A future table that is allowed to be cited as a measurement needs all of the fol
 - cold vs warm called out when the first invocation pays a page fault or a JIT-less first touch of a big grid
 - the bench command and the date
 
-`0.8.0` did not produce a new table. Do not invent one. The 0.7 instability gate and the 0.8 risk-book extensions are a few compares; they are not in the rows below.
+`0.8.0` did not produce a new table. The dated block at the top of this file is the `0.9.0-zig-falsify` measurement, taken with the checklist above. The rows below stay the `0.5.0` / `0.7.0` log. The 0.7 instability gate and the 0.8 risk-book extensions are a few compares; they are not in those historical rows.
 
 **Version stamp on the historical rows:** `0.7.0-zig-state-os` host note, measurements mostly from `0.5.0-zig-oom-citadel-lit` as the next paragraph says.  
 
