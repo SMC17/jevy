@@ -19,6 +19,8 @@
 //!  15. tdf_threshold — 200 bp trigger, 175 bp destination.
 //!  16. overwrite_roll — sell gen-3 cover when IV is rich.
 //!  17. toxic_sleeve — two names, one collinear loser. Allocator cuts it.
+//!  18. ortho_break — skew and fly are one factor. Allocator keeps the better leg.
+//!  19. toxic_multi — three names, one negative clone. Allocator cuts the clone.
 //!
 //! Article (the `/p/` path 404s; this is the live URL):
 //!   https://www.predictingalpha.com/blogs/what-i-learned-from-citadels-training-software
@@ -544,10 +546,49 @@ fn toxicSleeve(strategy: Strategy, peer_pnl: f64) CaseScore {
         const series = [_][]const f64{ &good, &toxic };
         const enabled = [_]bool{ true, true };
         var w: [2]f64 = .{ 0, 0 };
-        desk_k.allocateInverseVol(series[0..], &enabled, 0.40, 0.50, &w);
+        desk_k.allocateInverseVol(series[0..], &enabled, 0.35, 0.35, 0.0, &w);
         for (good, toxic) |g, t| pnl += w[0] * g + w[1] * t;
     } else {
         for (good, toxic) |g, t| pnl += 0.5 * g + 0.5 * t;
+    }
+    const inv = [_]f64{0.0};
+    const beta = [_]f64{0.0};
+    return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
+}
+
+fn orthoBreak(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const skew = [_]f64{ 0.04, 0.02, 0.05, 0.03, 0.04, 0.03 };
+    var fly: [6]f64 = undefined;
+    for (skew, 0..) |s, i| fly[i] = 0.93 * s - 0.04;
+    var pnl: f64 = 0.0;
+    if (strategy == .desk) {
+        const series = [_][]const f64{ &skew, &fly };
+        const enabled = [_]bool{ true, true };
+        var w: [2]f64 = .{ 0, 0 };
+        desk_k.allocateInverseVol(series[0..], &enabled, 1.0, 0.35, 0.0, &w);
+        for (skew, fly) |s, f| pnl += w[0] * s + w[1] * f;
+    } else {
+        for (skew, fly) |s, f| pnl += 0.5 * s + 0.5 * f;
+    }
+    const inv = [_]f64{0.0};
+    const beta = [_]f64{0.0};
+    return scorePath(pnl, &inv, &beta, 0.0, 0.0, 0.0, peer_pnl);
+}
+
+fn toxicMulti(strategy: Strategy, peer_pnl: f64) CaseScore {
+    const good = [_]f64{ 0.03, 0.04, 0.02, 0.05, 0.03, 0.04 };
+    const other = [_]f64{ 0.01, 0.02, 0.015, 0.012, 0.018, 0.016 };
+    var clone: [6]f64 = undefined;
+    for (good, 0..) |g, i| clone[i] = g - 0.07;
+    var pnl: f64 = 0.0;
+    if (strategy == .desk) {
+        const series = [_][]const f64{ &good, &other, &clone };
+        const enabled = [_]bool{ true, true, true };
+        var w: [3]f64 = .{ 0, 0, 0 };
+        desk_k.allocateInverseVol(series[0..], &enabled, 0.35, 0.35, 0.0, &w);
+        for (good, other, clone) |g, o, c| pnl += w[0] * g + w[1] * o + w[2] * c;
+    } else {
+        for (good, other, clone) |g, o, c| pnl += (g + o + c) / 3.0;
     }
     const inv = [_]f64{0.0};
     const beta = [_]f64{0.0};
@@ -572,6 +613,8 @@ pub fn runCase(name: []const u8, strategy: Strategy, peer_pnl: f64) CaseScore {
     if (std.mem.eql(u8, name, "tdf_threshold")) return tdfThreshold(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "overwrite_roll")) return overwriteRoll(strategy, peer_pnl);
     if (std.mem.eql(u8, name, "toxic_sleeve")) return toxicSleeve(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "ortho_break")) return orthoBreak(strategy, peer_pnl);
+    if (std.mem.eql(u8, name, "toxic_multi")) return toxicMulti(strategy, peer_pnl);
     return .{};
 }
 
@@ -593,6 +636,8 @@ pub const CASES = [_][]const u8{
     "tdf_threshold",
     "overwrite_roll",
     "toxic_sleeve",
+    "ortho_break",
+    "toxic_multi",
 };
 
 test "location arb sim cannot hedge; futures overlay leaves basis risk" {
@@ -695,7 +740,12 @@ test "toxic sleeve allocator cuts the loser" {
     try std.testing.expectApproxEqAbs(naive.absolute_pnl, 0.0, 1e-12);
     try std.testing.expect(desk.absolute_pnl > naive.absolute_pnl);
     try std.testing.expect(desk.risk_adjusted > naive.risk_adjusted);
-    try std.testing.expectApproxEqAbs(desk.absolute_pnl, 0.084, 1e-9);
+    try std.testing.expectApproxEqAbs(desk.absolute_pnl, 0.0735, 1e-9);
+}
+
+test "orthogonality break keeps the better smile leg" {
+    try deskBeatsNaive("ortho_break");
+    try deskBeatsNaive("toxic_multi");
 }
 
 test "state-os cases: the desk policy beats the naive one" {

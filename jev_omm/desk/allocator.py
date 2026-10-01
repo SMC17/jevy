@@ -1,20 +1,26 @@
-"""Inverse-vol sleeve weights with a correlation shrink and a concentration cap.
+"""Inverse-vol sleeve weights with a correlation shrink, a Sharpe tilt, and a cap.
 
 Same rule as ``zig/src/desk.zig`` ``allocateInverseVol``. Disabled sleeves
 stay at weight 0 (the off switch is the identity: they do not take risk).
 
 Rule, in order:
 
-1. Sample standard deviation with divisor n−1. Floor σ at 1e-8.
-2. Raw weight proportional to 1/σ.
-3. For every enabled pair with |ρ| > ``corr_cap`` (default 0.50), multiply
+1. Sample standard deviation with divisor n−1. A series with σ < 1e-5 has
+   no residual variance and gets raw weight 0. Otherwise floor σ at 1e-8.
+2. Raw weight proportional to ``boost / σ``. ``boost`` is
+   ``min(3, 1 + tilt * max(Sharpe, 0))``. A negative residual mean multiplies
+   ``boost`` by 0.25. ``tilt`` defaults to 0 in this function so the
+   toxic-sleeve example stays exact. The desk passes ``DEFAULT_SHARPE_TILT``.
+   The 0.25 haircut still applies at tilt 0, so a legacy replay of the 1.0
+   weight vector will not match: negative-mean sleeves shrink.
+3. For every enabled pair with |ρ| > ``corr_cap`` (default 0.35), multiply
    both raw weights by ``corr_cap / |ρ|``. A sleeve in several pairs is
    scaled once per pair.
 4. If a sleeve's residual mean is negative and another enabled sleeve has
    |ρ| above the cap and a strictly higher mean, set the worse sleeve's raw
    weight to 0.
 5. Renormalize the survivors so they sum to 1.
-6. Cap any weight at ``max_weight`` (default 0.40). Excess is spread across
+6. Cap any weight at ``max_weight`` (default 0.35). Excess is spread across
    uncapped positive weights. If every survivor is already capped, the
    leftover stays in cash and the weights sum to less than 1.
 """
@@ -27,9 +33,20 @@ import numpy as np
 
 from jev_omm.pnl.residual import pearson
 
-MAX_SLEEVES = 8
-DEFAULT_CORR_CAP = 0.50
-DEFAULT_MAX_WEIGHT = 0.40
+MAX_SLEEVES = 24
+DEFAULT_CORR_CAP = 0.35
+DEFAULT_MAX_WEIGHT = 0.35
+DEFAULT_SHARPE_TILT = 0.25
+_TILT_CAP = 3.0
+_FLAT_STD = 1e-5
+
+
+def _raw_std(x: np.ndarray) -> float:
+    if x.size < 2:
+        return 0.0
+    m = float(np.mean(x))
+    var = float(np.sum((x - m) ** 2) / (x.size - 1))
+    return math.sqrt(max(var, 0.0))
 
 
 def _mean_std(x: np.ndarray) -> tuple[float, float]:
@@ -38,8 +55,7 @@ def _mean_std(x: np.ndarray) -> tuple[float, float]:
     m = float(np.mean(x))
     if x.size < 2:
         return m, 1.0
-    var = float(np.sum((x - m) ** 2) / (x.size - 1))
-    std = math.sqrt(max(var, 0.0))
+    std = _raw_std(x)
     if std < 1e-8:
         std = 1e-8
     return m, std
@@ -51,6 +67,7 @@ def allocate(
     *,
     max_weight: float = DEFAULT_MAX_WEIGHT,
     corr_cap: float = DEFAULT_CORR_CAP,
+    sharpe_tilt: float = 0.0,
 ) -> np.ndarray:
     series = [np.asarray(s, dtype=float).reshape(-1) for s in residual]
     n = len(series)
@@ -63,8 +80,21 @@ def allocate(
     rho = np.eye(n)
     for i in range(m):
         means[i], std = _mean_std(series[i])
-        if on[i]:
-            inv[i] = 1.0 / std
+        if not on[i]:
+            continue
+        raw_std = _raw_std(series[i])
+        if raw_std < _FLAT_STD:
+            inv[i] = 0.0
+            continue
+        sharpe = means[i] / raw_std if raw_std > 0.0 else 0.0
+        boost = 1.0 + float(sharpe_tilt) * max(sharpe, 0.0)
+        if boost > _TILT_CAP:
+            boost = _TILT_CAP
+        # A negative residual mean is down-weighted even when it is not
+        # collinear. The hard zero remains rule 4, for the correlated loser.
+        if means[i] < 0.0:
+            boost *= 0.25
+        inv[i] = boost / std
     for i in range(m):
         for j in range(i + 1, m):
             p = pearson(series[i], series[j])

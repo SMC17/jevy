@@ -20,15 +20,15 @@ European Black–Scholes–Merton analytic price + delta/gamma/vega/theta.
 
 **Real today**, including vanna (\(\partial^2V/\partial S\partial\sigma\)) and volga (\(\partial^2V/\partial\sigma^2\)). **Upgrade:** American (tree/PDE), local vol, Heston, dividend schedules, discrete cash dividends; rho greek export.
 
-## `desk/` (`1.0.0-zig-desk`)
+## `desk/` (`1.1.0-zig-ortho`)
 
-Paper multi-product book. `SurfaceBook` in `surface/book.py` fits raw SVI per underlier and expiry, runs the existing butterfly and calendar gates, and damps a calendar break instead of quoting through it. Eight sleeves in `desk/sleeves.py` (`mm_spread`, `skew_residual`, `calendar_term`, `fly_butterfly`, `vrp_varswap`, `flow_toxicity`, `gex_forced`, `parity_box`) each expose a target, a risk budget, greeks, and a PnL stream. `enabled=False` is a zero target. Flow and the instability gate stay at multiplier 1 when `gates_on` is false.
+Paper multi-product book. `SurfaceBook` in `surface/book.py` fits raw SVI per underlier and expiry, runs the existing butterfly and calendar gates, and damps a calendar break instead of quoting through it. It also reports a front Dupire local variance and a sticky-delta minus sticky-strike gap. Twenty sleeves in `desk/sleeves.py` each expose a target, a risk budget, greeks, and a PnL stream. The first eight are the 1.0 names. `enabled=False` is a zero target. Flow, COT, the autocall warehouse, and the instability gate stay at the identity when `gates_on` is false.
 
-`pnl/residual.py` and `zig/src/desk.zig` strip index beta and the greek gamma and vega buckets. The residual keeps the intercept. `desk/allocator.py` is inverse-vol with a 0.50 correlation shrink, a cut of the worse leg of a collinear pair, and a 0.40 concentration cap. The scoreboard and the seed-11 correlation table are in [ablation_sleeve_corr.md](./ablation_sleeve_corr.md). Write-ups: [SURFACE_DESK.md](./SURFACE_DESK.md), [SLEEVES.md](./SLEEVES.md), [RESIDUAL_PNL.md](./RESIDUAL_PNL.md).
+`pnl/residual.py` and `zig/src/desk.zig` strip index beta, spot gamma, vega, and (by default) volga, vanna, and a variance column orthogonal to spot gamma. The residual keeps the intercept. `desk/orthogonal.py` residualizes or merges a pair whose residual `|ρ|` is above 0.40, then the harness strips the factor columns again. `desk/allocator.py` is inverse-vol with a 0.35 correlation shrink, a 0.25 haircut on a negative residual mean, a cut of the worse leg of a collinear pair, a Sharpe tilt of 0.25 on the desk, and a 0.35 concentration cap. The scoreboard is in [ablation_sleeve_corr.md](./ablation_sleeve_corr.md). Write-ups: [ORTHOGONALITY.md](./ORTHOGONALITY.md), [SURFACE_DESK.md](./SURFACE_DESK.md), [SLEEVES.md](./SLEEVES.md), [RESIDUAL_PNL.md](./RESIDUAL_PNL.md).
 
-The fixture `data/fixtures/surfaces_synthetic.csv` is labeled `synthetic_fixture=1`. It is not an OPRA tape.
+The fixture `data/fixtures/surfaces_synthetic.csv` is labeled `synthetic_fixture=1`. Eight underliers. It is not an OPRA tape. `CRYPTO_BETA` is `crypto_synthetic`.
 
-Optional desk questions `sleeve_weight` and `kill_sleeve` are a separate System One map. The offline fallback answers `hold` and kill-noul 0 when `desk.enabled` is off. Jev still does not emit an order.
+Optional desk questions `sleeve_weight`, `kill_sleeve`, `surface_suspect`, `merge_sleeve`, `cut_corr_pair`, and `product_kill` are a separate System One map. The offline fallback is the identity when `desk.enabled` is off. Jev still does not emit an order.
 
 ## `surface/`
 

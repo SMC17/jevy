@@ -385,24 +385,48 @@ class DeterministicFallbackClient(DecisionClient):
             desk_on = float(desk.get("enabled", 0.0)) >= 0.5
             toxic_sleeve = desk_on and float(desk.get("sleeve_toxic", 0.0)) >= 0.5
             surface_hot = desk_on and float(desk.get("surface_rmse", 0.0)) >= 0.02
+            ortho_break = desk_on and float(desk.get("ortho_break", 0.0)) >= 0.5
+            product_toxic = desk_on and float(desk.get("product_toxic", 0.0)) >= 0.5
             if not desk_on:
                 weight_choice, weight_conf, kill_noul = "hold", 0.90, 0.0
+                merge_choice, cut_noul, product_noul = "keep", 0.0, 0.0
             elif toxic_sleeve:
                 weight_choice, weight_conf, kill_noul = "cut", 0.84, 0.86
+                merge_choice, cut_noul, product_noul = "keep", 0.05, 0.04
+            elif ortho_break:
+                weight_choice, weight_conf, kill_noul = "cut", 0.80, 0.20
+                merge_choice, cut_noul, product_noul = "merge", 0.84, 0.04
+            elif product_toxic:
+                weight_choice, weight_conf, kill_noul = "hold", 0.78, 0.10
+                merge_choice, cut_noul, product_noul = "keep", 0.10, 0.82
             elif surface_hot:
                 weight_choice, weight_conf, kill_noul = "cut", 0.72, 0.40
+                merge_choice, cut_noul, product_noul = "keep", 0.05, 0.04
             else:
                 weight_choice, weight_conf, kill_noul = "hold", 0.80, 0.05
+                merge_choice, cut_noul, product_noul = "keep", 0.05, 0.04
             weight_probs = {k: 0.08 for k in ("cut", "hold", "boost")}
             weight_probs[weight_choice] = max(0.55, weight_conf)
             ws = sum(weight_probs.values())
             weight_probs = {k: v / ws for k, v in weight_probs.items()}
+            merge_probs = {k: 0.15 for k in ("keep", "merge")}
+            merge_probs[merge_choice] = 0.70
+            ms = sum(merge_probs.values())
+            merge_probs = {k: v / ms for k, v in merge_probs.items()}
             desk_answers = {
                 "sleeve_weight": ChoiceAnswer(
                     choice=weight_choice, probabilities=weight_probs, confidence=weight_conf
                 ),
                 "kill_sleeve": NoulAnswer(noul=kill_noul),
             }
+            if "merge_sleeve" in asked:
+                desk_answers["merge_sleeve"] = ChoiceAnswer(
+                    choice=merge_choice, probabilities=merge_probs, confidence=0.8
+                )
+            if "cut_corr_pair" in asked:
+                desk_answers["cut_corr_pair"] = NoulAnswer(noul=cut_noul)
+            if "product_kill" in asked:
+                desk_answers["product_kill"] = NoulAnswer(noul=product_noul)
         answers = {
             "regime": ChoiceAnswer(choice=regime, probabilities=regime_probs, confidence=regime_conf),
             "toxicity": ScoreAnswer(

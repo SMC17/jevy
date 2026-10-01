@@ -282,6 +282,26 @@ fn doResidualStrip(i: usize) f64 {
     return fit.r2 + fit.beta + out[i % 256];
 }
 
+fn doResidualStripK(i: usize) f64 {
+    var r: [128]f64 = undefined;
+    var factors: [6 * 128]f64 = undefined;
+    var out: [128]f64 = undefined;
+    var coef: [6]f64 = .{0} ** 6;
+    var t: usize = 0;
+    while (t < 128) : (t += 1) {
+        const x = @as(f64, @floatFromInt((i + t) % 19)) * 0.01;
+        factors[0 * 128 + t] = x - 0.08;
+        factors[1 * 128 + t] = x * x;
+        factors[2 * 128 + t] = @as(f64, @floatFromInt(t % 7)) * 0.01;
+        factors[3 * 128 + t] = x * 0.2;
+        factors[4 * 128 + t] = -x * 0.1;
+        factors[5 * 128 + t] = x * x * 0.5;
+        r[t] = 0.3 * factors[t] + 0.8 * factors[128 + t] + 0.1 * factors[2 * 128 + t] + 0.01;
+    }
+    const fit = desk_k.stripResidualFactors(&r, 6, &factors, &out, &coef);
+    return fit.r2 + coef[0] + out[i % 128];
+}
+
 fn doTrainingLocation(i: usize) f64 {
     _ = i;
     const naive = training.runCase("location_arb", .naive, 0.0);
@@ -324,4 +344,5 @@ pub fn main() void {
     benchOne("hawkes/intensity_8_events", 500_000, &doHawkesIntensity);
     benchOne("training/location_arb_pair", 2_000, &doTrainingLocation);
     benchOne("desk/residual_strip_n256", 50_000, &doResidualStrip);
+    benchOne("desk/residual_strip_k6_n128", 50_000, &doResidualStripK);
 }
