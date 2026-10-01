@@ -291,6 +291,16 @@ def build_desk_questions() -> dict[str, dict[str, Any]]:
                 "false": "Keep the product in the book",
             },
         ),
+        "sleeve_kill": NoulQuestion(
+            instructions=(
+                "Did the walk-forward residual edge fail, so code should set this sleeve's weight to zero? "
+                "A yes is a flag. It is not an order."
+            ),
+            criteria={
+                "true": "Test-window residual mean failed. Code zeros the weight.",
+                "false": "Leave the sleeve in the allocator",
+            },
+        ),
     }
     return {k: v.model_dump(exclude_none=True) for k, v in questions.items()}
 

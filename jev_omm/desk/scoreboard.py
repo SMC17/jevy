@@ -45,6 +45,25 @@ class SleeveRow:
     max_dd_residual: float
     n_fills: int
     fees: float
+    residual_sharpe_raw: float = 0.0
+    residual_sharpe_penalized: float = 0.0
+    smoothness_flag: str = "ok"
+    smoothness_penalty: float = 1.0
+    ac1: float = 0.0
+    dc_share: float = 0.0
+    const_trend_r2: float = 0.0
+    low_freq_share: float = 0.0
+    turnover: float = 0.0
+    avg_abs_inventory: float = 0.0
+    max_abs_inventory: float = 0.0
+    gamma_path_length: float = 0.0
+    vega_path_length: float = 0.0
+    quote_revisions_per_step: float = 0.0
+    residual_per_turnover: float = 0.0
+    residual_per_peak_inventory: float = 0.0
+    capacity_scale: float = 1.0
+    test_mean_residual: float = 0.0
+    sleeve_kill: bool = False
 
 
 @dataclass
@@ -70,6 +89,16 @@ class DeskScoreboard:
     stress_worst: float = 0.0
     stress_label: str = ""
     notes: list[str] = field(default_factory=list)
+    desk_sharpe_raw: float = 0.0
+    desk_turnover: float = 0.0
+    desk_peak_inventory: float = 0.0
+    desk_residual_per_turnover: float = 0.0
+    desk_residual_per_peak_inventory: float = 0.0
+    gamma_path_length: float = 0.0
+    vega_path_length: float = 0.0
+    quote_revisions_per_step: float = 0.0
+    product_kills: list[str] = field(default_factory=list)
+    sleeve_kills: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -96,32 +125,63 @@ def to_markdown(board: DeskScoreboard, *, title: str) -> str:
     lines = [
         f"# {title}",
         "",
-        "Synthetic paper desk. `synthetic_fixture=1`. Per-step residual Sharpe is mean / sample std after the research fee. It is not annualized.",
+        "Synthetic paper desk. `synthetic_fixture=1`. Per-step residual Sharpe is mean / sample std after the research fee. It is not annualized and it is not a capacity.",
+        "",
+        "Raw residual Sharpe is the unpenalized ratio. Penalized Sharpe multiplies by the smoothness penalty. A `flat` flag means the residual is a constant leftover and its weight is zero. Do not multiply either number by `√252`.",
         "",
         f"Products: {', '.join(board.products)}.",
         "",
-        f"Desk raw PnL {_fmt(board.desk_raw_pnl)}, residual PnL {_fmt(board.desk_residual_pnl)}, residual Sharpe {_fmt(board.desk_sharpe_residual)}, residual max drawdown {_fmt(board.desk_max_dd_residual)}, weight sum {_fmt(board.weight_sum)}.",
+        (
+            f"Desk raw PnL {_fmt(board.desk_raw_pnl)}, residual PnL {_fmt(board.desk_residual_pnl)}, "
+            f"raw residual Sharpe {_fmt(board.desk_sharpe_raw)}, penalized residual Sharpe {_fmt(board.desk_sharpe_residual)}, "
+            f"residual max drawdown {_fmt(board.desk_max_dd_residual)}, weight sum {_fmt(board.weight_sum)}."
+        ),
         "",
-        "| sleeve | weight | raw | residual | mean resid | resid Sharpe | R² | β | γ | ν | volga | vanna | var | fills |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        (
+            f"Gross turnover {_fmt(board.desk_turnover)}, peak |inventory| {_fmt(board.desk_peak_inventory)}, "
+            f"residual PnL per unit turnover {_fmt(board.desk_residual_per_turnover)}, "
+            f"residual PnL per unit peak inventory {_fmt(board.desk_residual_per_peak_inventory)}. "
+            f"Gamma path length {_fmt(board.gamma_path_length)}, vega path length {_fmt(board.vega_path_length)}, "
+            f"quote revisions per step {_fmt(board.quote_revisions_per_step)}."
+        ),
+        "",
+        "| sleeve | weight | raw | residual | mean resid | resid Sharpe raw | penalized | flag | R² | fills |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in board.rows:
         lines.append(
-            "| {id} | {w} | {raw} | {res} | {mu} | {sh} | {r2} | {b} | {g} | {v} | {vo} | {va} | {var} | {n} |".format(
+            "| {id} | {w} | {raw} | {res} | {mu} | {sh} | {pen} | {flag} | {r2} | {n} |".format(
                 id=row.sleeve_id,
                 w=_fmt(row.weight),
                 raw=_fmt(row.raw_pnl),
                 res=_fmt(row.residual_pnl),
                 mu=_fmt(row.mean_residual),
-                sh=_fmt(row.sharpe_residual),
+                sh=_fmt(row.residual_sharpe_raw if row.residual_sharpe_raw or row.smoothness_penalty != 1.0 else row.sharpe_residual),
+                pen=_fmt(row.residual_sharpe_penalized),
+                flag=row.smoothness_flag,
                 r2=_fmt(row.r2),
-                b=_fmt(row.beta),
-                g=_fmt(row.gamma_coef),
-                v=_fmt(row.vega_coef),
-                vo=_fmt(row.volga_coef),
-                va=_fmt(row.vanna_coef),
-                var=_fmt(row.var_coef),
                 n=row.n_fills,
+            )
+        )
+    lines.append("")
+    lines.append(
+        "| sleeve | AC1 | DC share | const+trend R² | low-freq | turnover | avg abs inv | peak abs inv | pnl/turn | pnl/peak | cap scale |"
+    )
+    lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    for row in board.rows:
+        lines.append(
+            "| {id} | {ac} | {dc} | {ct} | {lf} | {to} | {av} | {pk} | {pt} | {pp} | {sc} |".format(
+                id=row.sleeve_id,
+                ac=_fmt(row.ac1),
+                dc=_fmt(row.dc_share),
+                ct=_fmt(row.const_trend_r2),
+                lf=_fmt(row.low_freq_share),
+                to=_fmt(row.turnover),
+                av=_fmt(row.avg_abs_inventory),
+                pk=_fmt(row.max_abs_inventory),
+                pt=_fmt(row.residual_per_turnover),
+                pp=_fmt(row.residual_per_peak_inventory),
+                sc=_fmt(row.capacity_scale),
             )
         )
     lines.append("")

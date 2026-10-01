@@ -23,6 +23,12 @@ Rule, in order:
 6. Cap any weight at ``max_weight`` (default 0.35). Excess is spread across
    uncapped positive weights. If every survivor is already capped, the
    leftover stays in cash and the weights sum to less than 1.
+
+``sigma_clip_quantile`` in (0, 1) caps σ at that percentile of the enabled
+panel before step 2's division. ``0`` (the default) leaves σ unchanged, so
+existing callers keep the 1.1 weights. The Sharpe tilt still uses the
+unclipped sample σ. A min-weight floor is a separate step
+(``apply_min_weight_floor``); it is not inside this function.
 """
 
 from __future__ import annotations
@@ -61,6 +67,19 @@ def _mean_std(x: np.ndarray) -> tuple[float, float]:
     return m, std
 
 
+def _linear_quantile(values: list[float], q: float) -> float:
+    if not values:
+        return 0.0
+    xs = sorted(values)
+    if len(xs) == 1:
+        return xs[0]
+    pos = q * (len(xs) - 1)
+    lo = int(math.floor(pos))
+    hi = min(lo + 1, len(xs) - 1)
+    w = pos - math.floor(pos)
+    return xs[lo] * (1.0 - w) + xs[hi] * w
+
+
 def allocate(
     residual: list[np.ndarray] | list[list[float]],
     enabled: list[bool] | None = None,
@@ -68,6 +87,7 @@ def allocate(
     max_weight: float = DEFAULT_MAX_WEIGHT,
     corr_cap: float = DEFAULT_CORR_CAP,
     sharpe_tilt: float = 0.0,
+    sigma_clip_quantile: float = 0.0,
 ) -> np.ndarray:
     series = [np.asarray(s, dtype=float).reshape(-1) for s in residual]
     n = len(series)
@@ -78,15 +98,27 @@ def allocate(
     inv = np.zeros(n)
     means = np.zeros(n)
     rho = np.eye(n)
+    raw_stds = np.zeros(n)
+    floored = np.ones(n)
+    panel: list[float] = []
     for i in range(m):
-        means[i], std = _mean_std(series[i])
+        means[i], floored[i] = _mean_std(series[i])
+        raw_stds[i] = _raw_std(series[i])
+        if on[i] and raw_stds[i] >= _FLAT_STD:
+            panel.append(raw_stds[i])
+    clip = None
+    q = float(sigma_clip_quantile)
+    if 0.0 < q < 1.0 and panel:
+        clip = _linear_quantile(panel, q)
+        if not (clip > 0.0):
+            clip = None
+    for i in range(m):
         if not on[i]:
             continue
-        raw_std = _raw_std(series[i])
-        if raw_std < _FLAT_STD:
+        if raw_stds[i] < _FLAT_STD:
             inv[i] = 0.0
             continue
-        sharpe = means[i] / raw_std if raw_std > 0.0 else 0.0
+        sharpe = means[i] / raw_stds[i] if raw_stds[i] > 0.0 else 0.0
         boost = 1.0 + float(sharpe_tilt) * max(sharpe, 0.0)
         if boost > _TILT_CAP:
             boost = _TILT_CAP
@@ -94,7 +126,12 @@ def allocate(
         # collinear. The hard zero remains rule 4, for the correlated loser.
         if means[i] < 0.0:
             boost *= 0.25
-        inv[i] = boost / std
+        den = floored[i]
+        # Cap σ at a high percentile so a noisy sleeve is not sized as 1/∞.
+        # The Sharpe tilt above still uses the unclipped sample σ.
+        if clip is not None:
+            den = min(den, max(clip, 1e-8))
+        inv[i] = boost / den
     for i in range(m):
         for j in range(i + 1, m):
             p = pearson(series[i], series[j])
@@ -138,6 +175,80 @@ def allocate(
         for i in range(m):
             if w[i] > 0.0 and not capped[i]:
                 w[i] += excess * (w[i] / free_sum)
+    return w
+
+
+def renorm_cap(weights: np.ndarray, max_weight: float) -> np.ndarray:
+    """Renormalize positive weights to 1, then apply the concentration cap.
+
+    Excess above the cap is spread across uncapped positive weights. If every
+    survivor is capped, the leftover stays in cash.
+    """
+    w = np.asarray(weights, dtype=float).copy()
+    total = float(w.sum())
+    if not (total > 0.0):
+        return np.zeros_like(w)
+    w = w / total
+    n = int(w.size)
+    m = min(n, MAX_SLEEVES)
+    capped = np.zeros(n, dtype=bool)
+    for _ in range(MAX_SLEEVES):
+        excess = 0.0
+        free_sum = 0.0
+        for i in range(m):
+            if w[i] > max_weight + 1e-15:
+                excess += w[i] - max_weight
+                w[i] = max_weight
+                capped[i] = True
+            elif w[i] > 0.0 and not capped[i]:
+                free_sum += w[i]
+        if excess <= 1e-15 or not (free_sum > 0.0):
+            break
+        for i in range(m):
+            if w[i] > 0.0 and not capped[i]:
+                w[i] += excess * (w[i] / free_sum)
+    return w
+
+
+def apply_min_weight_floor(
+    weights: np.ndarray,
+    eligible: list[bool] | np.ndarray,
+    floor: float,
+    max_weight: float,
+) -> np.ndarray:
+    """Lift eligible weights up to ``floor``, funded by weights above it.
+
+    The sum is unchanged when donors can pay. A floor of 0 is the identity.
+    ``floor`` is capped by ``max_weight``. Callers should already have
+    applied the concentration cap; this function does not re-cap donors.
+    """
+    w = np.asarray(weights, dtype=float).copy()
+    if not (floor > 0.0) or w.size == 0:
+        return w
+    cap = min(float(floor), float(max_weight))
+    m = min(int(w.size), MAX_SLEEVES)
+    on = [bool(eligible[i]) if i < len(eligible) else False for i in range(m)]
+    need = 0.0
+    for i in range(m):
+        if not on[i]:
+            continue
+        if w[i] < cap:
+            need += cap - w[i]
+            w[i] = cap
+    for _ in range(MAX_SLEEVES):
+        if need <= 1e-12:
+            break
+        free = 0.0
+        for i in range(m):
+            if w[i] > cap + 1e-15:
+                free += w[i] - cap
+        if not (free > 1e-15):
+            break
+        take = min(need, free)
+        for i in range(m):
+            if w[i] > cap + 1e-15:
+                w[i] -= take * ((w[i] - cap) / free)
+        need -= take
     return w
 
 

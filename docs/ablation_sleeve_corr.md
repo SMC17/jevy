@@ -2,7 +2,7 @@
 
 Synthetic paper desk. `synthetic_fixture=1`. Per-step residual Sharpe is mean / sample std after the research fee. It is not annualized. Do not multiply by `√252`.
 
-Current desk: `python -m jev_omm.demo_surface_desk` (`1.1.0-zig-ortho`). The write-up of the factor split and the gate is [ORTHOGONALITY.md](./ORTHOGONALITY.md).
+The 1.1 scoreboard below is historical. The current desk is `1.2.0-zig-honest` (`python -m jev_omm.demo_surface_desk`). What survives the smoothness penalty, the allocator floor, and the falsification grid is in [ablation_desk_honest.md](./ablation_desk_honest.md). The factor split and the gate are in [ORTHOGONALITY.md](./ORTHOGONALITY.md). `legacy_ortho_config()` reprints the 1.1 residual correlations.
 
 ## 1.1.0-zig-ortho — seed 11, 80 steps, eight products, twenty sleeves
 
