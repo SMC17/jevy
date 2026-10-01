@@ -1,6 +1,6 @@
 # Surface desk
 
-**Version:** `1.0.0-zig-desk`  
+**Version:** `1.1.0-zig-ortho`  
 **Code:** `jev_omm/surface/book.py`, `jev_omm/desk/fixtures.py`, existing `jev_omm/surface/svi.py` / `zig/src/svi.zig`.  
 **Mode:** simulation / paper. The checked-in book is a synthetic fixture.
 
@@ -14,9 +14,9 @@ Cite Gatheral & Jacquier, [Arbitrage-free SVI volatility surfaces](https://arxiv
 
 | Field | Meaning |
 | --- | --- |
-| `underlier_id` | `EQ_INDEX`, `EQ_SINGLE`, `FX_PAIR` in the fixture |
-| `asset_class` | `equity_index`, `equity_single`, `fx_pair` |
-| `beta_to_index` | 1.00, 1.35, 0.15 on those three names |
+| `underlier_id` | eight names in `DEFAULT_PRODUCTS` (the original three, plus the five below) |
+| `asset_class` | `equity_index`, `equity_single`, `fx_pair`, `fx_em`, `commodity`, `rates`, `crypto_synthetic` |
+| `beta_to_index` | distinct on every name: 1.00, 1.35, 0.15, 0.42, 0.55, 0.28, 0.06, 1.70 |
 | `spot` | Input. `None` or non-positive stays missing |
 | `rate`, `div_yield` | Used only to build the forward when spot is present |
 | `slices` | Expiry in years → `SliceFit` |
@@ -43,8 +43,23 @@ Sticky strike keeps log-moneyness against the fit forward. Sticky delta rebuilds
 
 `jev_omm/data/fixtures/surfaces_synthetic.csv`
 
-Every row has `synthetic_fixture=1`. Three names, three expiries (30/365, 90/365, 180/365), nine log-moneyness points. Smiles differ on purpose: index skew, a steeper single-name skew, a near-symmetric FX smile. Betas to the equity factor are 1.00, 1.35, and 0.15. Regenerating the file is `render_csv()` in `jev_omm/desk/fixtures.py`. Nothing in that file is an OPRA print.
+Every row has `synthetic_fixture=1`. Eight names, three expiries (30/365, 90/365, 180/365), nine log-moneyness points (216 quote rows plus the header). Smiles differ on purpose.
+
+| Name | Class | Beta | What is different |
+| --- | --- | --- | --- |
+| `EQ_INDEX` | equity_index | 1.00 | index skew |
+| `EQ_SINGLE` | equity_single | 1.35 | steeper skew, higher idio |
+| `EQ_LOWBETA` | equity_single | 0.42 | shallow skew |
+| `FX_PAIR` | fx_pair | 0.15 | near-symmetric smile |
+| `FX_EM` | fx_em | 0.55 | higher rate and dividend |
+| `COMMO_ENERGY` | commodity | 0.28 | `season_amp` 0.04, the roll sleeve's market |
+| `RATES_STIR` | rates | 0.06 | short rate, positive SVI rho |
+| `CRYPTO_BETA` | crypto_synthetic | 1.70 | fake high-vol name. Not a coin tape |
+
+Regenerating the file is `render_csv()` in `jev_omm/desk/fixtures.py`. Nothing in that file is an OPRA print. `CRYPTO_BETA` is labeled `crypto_synthetic` so it is not read as a market print.
 
 ## How sleeves consume it
 
-The desk refits each name every `fit_stride` steps (default 20) inside `run_desk`. Suspect slices are counted. On the default seed, 10 of 36 slice fits came back `surface_suspect`. The book still marks them, with the calendar damp when that gate failed. Sleeves do not receive a live order from a suspect flag. The offline desk battery can raise `surface_suspect` when `desk.enabled` is on and the fit rmse is at least 0.02. With the gate off, that answer is not asked.
+The desk refits each name every `fit_stride` steps (default 20) inside `run_desk` when `fit_surfaces` is true. Sleeve PnL does not read the fit. On seed 11, 80 steps, eight names, that audit is 4 refits, 25 suspect slices, and 25 calendar breaks. The book still marks them, with the calendar damp when that gate failed. EQ_INDEX front Dupire local variance on that run is 0.0268. The sticky-delta minus sticky-strike ATM gap after a 1% spot move is 0.0038. The 1.0 three-name book reported 10 of 36 slices suspect. Sleeves do not receive a live order from a suspect flag. The offline desk battery can raise `surface_suspect` when `desk.enabled` is on and the fit rmse is at least 0.02. With the gate off, that answer is not asked.
+
+Quotes carry a `k⁴` wing bump so `wing_kurtosis` has a surface to be audited against. The sleeve itself trades the planted wing factor, not the fitted residual.

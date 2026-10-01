@@ -18,7 +18,8 @@ def per_step_sharpe(x: np.ndarray) -> float:
     if arr.size < 2:
         return 0.0
     sd = float(np.std(arr, ddof=1))
-    if sd < 1e-12:
+    # A numerical leftover after a strip is not a Sharpe. 1e-8 matches the allocator floor.
+    if sd < 1e-8:
         return 0.0
     return float(np.mean(arr) / sd)
 
@@ -37,6 +38,9 @@ class SleeveRow:
     beta: float
     gamma_coef: float
     vega_coef: float
+    volga_coef: float
+    vanna_coef: float
+    var_coef: float
     max_dd_raw: float
     max_dd_residual: float
     n_fills: int
@@ -57,6 +61,14 @@ class DeskScoreboard:
     desk_max_dd_residual: float
     weight_sum: float
     synthetic_fixture: int = 1
+    corr_cap: float = 0.35
+    pre_gate_max_abs_rho: float = 0.0
+    max_abs_rho: float = 0.0
+    product_corr_sleeve: str = ""
+    product_ids: list[str] = field(default_factory=list)
+    product_pearson: np.ndarray | None = None
+    stress_worst: float = 0.0
+    stress_label: str = ""
     notes: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -90,12 +102,12 @@ def to_markdown(board: DeskScoreboard, *, title: str) -> str:
         "",
         f"Desk raw PnL {_fmt(board.desk_raw_pnl)}, residual PnL {_fmt(board.desk_residual_pnl)}, residual Sharpe {_fmt(board.desk_sharpe_residual)}, residual max drawdown {_fmt(board.desk_max_dd_residual)}, weight sum {_fmt(board.weight_sum)}.",
         "",
-        "| sleeve | weight | raw | residual | mean resid | resid Sharpe | R² | β | γ | ν | fills |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| sleeve | weight | raw | residual | mean resid | resid Sharpe | R² | β | γ | ν | volga | vanna | var | fills |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in board.rows:
         lines.append(
-            "| {id} | {w} | {raw} | {res} | {mu} | {sh} | {r2} | {b} | {g} | {v} | {n} |".format(
+            "| {id} | {w} | {raw} | {res} | {mu} | {sh} | {r2} | {b} | {g} | {v} | {vo} | {va} | {var} | {n} |".format(
                 id=row.sleeve_id,
                 w=_fmt(row.weight),
                 raw=_fmt(row.raw_pnl),
@@ -106,6 +118,9 @@ def to_markdown(board: DeskScoreboard, *, title: str) -> str:
                 b=_fmt(row.beta),
                 g=_fmt(row.gamma_coef),
                 v=_fmt(row.vega_coef),
+                vo=_fmt(row.volga_coef),
+                va=_fmt(row.vanna_coef),
+                var=_fmt(row.var_coef),
                 n=row.n_fills,
             )
         )
@@ -120,14 +135,35 @@ def to_markdown(board: DeskScoreboard, *, title: str) -> str:
         cells = " | ".join(_fmt(float(board.pearson[i, j])) for j in range(len(ids)))
         lines.append(f"| {name} | {cells} |")
     lines.append("")
-    lines.append("## Pairs with |ρ| > 0.5")
+    cap = board.corr_cap
+    lines.append(f"## Pairs with |ρ| > {cap:.2f}")
     lines.append("")
     if not board.flagged_pairs:
-        lines.append("No enabled pair exceeded 0.5 on this sample.")
+        lines.append(f"No enabled pair exceeded {cap:.2f} on this sample.")
     else:
         for a, b, rho in board.flagged_pairs:
             lines.append(f"- `{a}` / `{b}`: Pearson {_fmt(rho)}")
     lines.append("")
+    lines.append(
+        f"Pre-gate max |ρ| {_fmt(board.pre_gate_max_abs_rho)}. "
+        f"Post-gate max |ρ| {_fmt(board.max_abs_rho)}."
+    )
+    lines.append("")
+    if board.product_pearson is not None and board.product_ids:
+        lines.append(f"## {board.product_corr_sleeve} residual correlation across products")
+        lines.append("")
+        pids = board.product_ids
+        lines.append("| | " + " | ".join(pids) + " |")
+        lines.append("| --- | " + " | ".join("---" for _ in pids) + " |")
+        for i, name in enumerate(pids):
+            cells = " | ".join(_fmt(float(board.product_pearson[i, j])) for j in range(len(pids)))
+            lines.append(f"| {name} | {cells} |")
+        lines.append("")
+    if board.stress_label:
+        lines.append(
+            f"Scenario grid worst {_fmt(board.stress_worst)} at {board.stress_label}. Research units, end-of-path greeks."
+        )
+        lines.append("")
     if board.notes:
         lines.append("## Notes")
         lines.append("")

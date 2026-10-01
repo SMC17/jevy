@@ -38,6 +38,10 @@ class StripFit:
     r2: float
     residual: np.ndarray
     n_factors: int
+    volga_coef: float = 0.0
+    vanna_coef: float = 0.0
+    var_coef: float = 0.0
+    coefs: tuple[float, ...] = ()
 
     @property
     def mean_residual(self) -> float:
@@ -68,18 +72,45 @@ def _as_1d(x: np.ndarray | list[float], name: str, n: int | None = None) -> np.n
     return arr
 
 
-def _strip_python(
-    raw: np.ndarray,
-    f_beta: np.ndarray,
-    f_gamma: np.ndarray,
-    f_vega: np.ndarray | None,
-) -> StripFit:
+def _fit_from_coefs(raw: np.ndarray, cols: list[np.ndarray], coef: np.ndarray) -> StripFit:
     n = int(raw.size)
-    use_v = f_vega is not None
-    cols = [f_beta, f_gamma] if not use_v else [f_beta, f_gamma, f_vega]
     k = len(cols)
-    if n == 0:
-        return StripFit(0.0, 0.0, 0.0, 0.0, np.zeros(0), 0)
+    if n == 0 or k == 0:
+        return StripFit(0.0, 0.0, 0.0, 0.0, np.zeros(n), 0)
+    yhat = np.zeros(n)
+    for j in range(k):
+        yhat = yhat + float(coef[j]) * cols[j]
+    resid = raw - yhat
+    mean_r = float(np.mean(raw))
+    centered_e = resid - float(np.mean(resid))
+    centered = raw - mean_r
+    ss_res = float(np.dot(centered_e, centered_e))
+    ss_tot = float(np.dot(centered, centered))
+    r2 = 0.0 if ss_tot <= 1e-18 else 1.0 - ss_res / ss_tot
+    packed = tuple(float(c) for c in coef)
+
+    def _at(i: int) -> float:
+        return float(coef[i]) if i < k else 0.0
+
+    return StripFit(
+        beta=_at(0),
+        gamma_coef=_at(1),
+        vega_coef=_at(2),
+        r2=float(r2),
+        residual=resid,
+        n_factors=k,
+        volga_coef=_at(3),
+        vanna_coef=_at(4),
+        var_coef=_at(5),
+        coefs=packed,
+    )
+
+
+def _solve_coefs(raw: np.ndarray, cols: list[np.ndarray]) -> np.ndarray:
+    n = int(raw.size)
+    k = len(cols)
+    if n == 0 or k == 0:
+        return np.zeros(k)
     means = [float(np.mean(c)) for c in cols]
     mean_r = float(np.mean(raw))
     xtx = np.zeros((k, k))
@@ -90,28 +121,23 @@ def _strip_python(
             xtx[i, j] = float(np.dot(cols[i], cols[j]) - n * means[i] * means[j])
         xtx[i, i] += RIDGE
     try:
-        coef = np.linalg.solve(xtx, xty)
+        return np.linalg.solve(xtx, xty)
     except np.linalg.LinAlgError:
-        coef = np.zeros(k)
-    yhat = coef[0] * f_beta + coef[1] * f_gamma
-    vega_coef = 0.0
-    if use_v:
-        yhat = yhat + coef[2] * f_vega
-        vega_coef = float(coef[2])
-    resid = raw - yhat
-    centered_e = resid - float(np.mean(resid))
-    centered = raw - mean_r
-    ss_res = float(np.dot(centered_e, centered_e))
-    ss_tot = float(np.dot(centered, centered))
-    r2 = 0.0 if ss_tot <= 1e-18 else 1.0 - ss_res / ss_tot
-    return StripFit(
-        beta=float(coef[0]),
-        gamma_coef=float(coef[1]),
-        vega_coef=vega_coef,
-        r2=float(r2),
-        residual=resid,
-        n_factors=k,
-    )
+        return np.zeros(k)
+
+
+def _strip_python(
+    raw: np.ndarray,
+    f_beta: np.ndarray,
+    f_gamma: np.ndarray,
+    f_vega: np.ndarray | None,
+) -> StripFit:
+    n = int(raw.size)
+    if n == 0:
+        return StripFit(0.0, 0.0, 0.0, 0.0, np.zeros(0), 0)
+    cols = [f_beta, f_gamma] if f_vega is None else [f_beta, f_gamma, f_vega]
+    coef = _solve_coefs(raw, cols)
+    return _fit_from_coefs(raw, cols, coef)
 
 
 def _strip_zig(
@@ -193,6 +219,75 @@ def strip_residual(
         if zig is not None:
             return zig
     return _strip_python(y, fb, fg, fv)
+
+
+MAX_FACTORS = 6
+
+
+def _strip_zig_k(raw: np.ndarray, cols: list[np.ndarray]) -> StripFit | None:
+    lib = _native._lib
+    if not _native.ZIG_AVAILABLE or lib is None or not hasattr(lib, "jev_omm_residual_strip_k"):
+        return None
+    n = int(raw.size)
+    k = len(cols)
+    if k < 1 or k > MAX_FACTORS:
+        return None
+    if not hasattr(lib, "_jev_residual_k_bound"):
+        lib.jev_omm_residual_strip_k.argtypes = [
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+        ]
+        lib.jev_omm_residual_strip_k.restype = None
+        lib._jev_residual_k_bound = True
+    packed = np.ascontiguousarray(np.concatenate(cols), dtype=np.float64)
+    out = np.zeros(n, dtype=np.float64)
+    coef = np.zeros(k, dtype=np.float64)
+    r2 = ctypes.c_double()
+    lib.jev_omm_residual_strip_k(
+        n,
+        k,
+        raw.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        packed.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        out.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        coef.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+        ctypes.byref(r2),
+    )
+    fit = _fit_from_coefs(raw, cols, coef)
+    # Trust the Zig residual and R². Coefs come from the same solve.
+    fit.residual = out
+    fit.r2 = float(r2.value)
+    return fit
+
+
+def strip_factors(
+    raw: np.ndarray | list[float],
+    factors: list[np.ndarray | list[float]],
+    *,
+    prefer_zig: bool = True,
+) -> StripFit:
+    """Project ``raw`` onto an ordered factor list. At most six columns.
+
+    Column order used by the desk is beta, spot-gamma, vega, volga, vanna,
+    and variance (quadratic variation orthogonal to spot-gamma). Fewer
+    columns are allowed. The intercept stays in the residual mean.
+    """
+    y = np.ascontiguousarray(_as_1d(raw, "raw"), dtype=np.float64)
+    cols = [np.ascontiguousarray(_as_1d(col, f"f{i}", y.size), dtype=np.float64) for i, col in enumerate(factors)]
+    if len(cols) > MAX_FACTORS:
+        raise ValueError(f"at most {MAX_FACTORS} factors, got {len(cols)}")
+    if prefer_zig:
+        zig = _strip_zig_k(y, cols)
+        if zig is not None:
+            return zig
+    if y.size == 0:
+        return StripFit(0.0, 0.0, 0.0, 0.0, np.zeros(0), 0)
+    coef = _solve_coefs(y, cols)
+    return _fit_from_coefs(y, cols, coef)
 
 
 def factors_from_greeks(

@@ -137,15 +137,35 @@ Same score as the earlier cases. The desk policy is code. A Decision snapshot, w
 
 Tests: `test_state_os_training_cases_teach_the_gate`, Zig `state-os cases: the desk policy beats the naive one`.
 
-## 17. `toxic_sleeve` (`1.0.0-zig-desk`)
+## 17. `toxic_sleeve` (`1.1.0-zig-ortho`, was `1.0.0-zig-desk`)
 
 **Role:** sleeve allocator across two synthetic names.  
-**Information:** residual series for `mm_spread` and a collinear toxic sleeve, correlation cap 0.50, concentration cap 0.40.  
-**Lesson:** equal weight keeps a negative sleeve that is the same factor as a better one. The desk allocator zeros the worse leg and caps the survivor at 0.40. PnL on the fixed series is 0.084 versus 0 for the naive book.
+**Information:** residual series for `mm_spread` and a collinear toxic sleeve, correlation cap 0.35, concentration cap 0.35, Sharpe tilt 0.  
+**Lesson:** equal weight keeps a negative sleeve that is the same factor as a better one. The desk allocator zeros the worse leg and caps the survivor at 0.35. PnL on the fixed series is 0.0735 versus 0 for the naive book. The 1.0 lesson used cap 0.40 and printed 0.084.
 
 The offline fallback sees `desk.enabled`. Off, `sleeve_weight` is `hold` and `kill_sleeve` is 0, and the policy multiplier stays 1. On, with the toxic flag, kill noul is above 0.70 and code sets the weight. The answer is not an order. Carr and Wu, Review of Financial Studies 2009, [doi:10.1093/rfs/hhn039](https://doi.org/10.1093/rfs/hhn039), is the variance-premium citation for the residual object. The allocator rule itself is the one in [SLEEVES.md](./SLEEVES.md).
 
 Tests: `test_toxic_sleeve_training_case`, Zig `toxic sleeve allocator cuts the loser`.
+
+## 18. `ortho_break` (`1.1.0-zig-ortho`)
+
+**Role:** two sleeves, one smile factor.  
+**Information:** a skew residual and a fly series `0.93 * skew − 0.04`, so Pearson is 1. Correlation cap 0.35. Concentration cap is 1 on this lesson so the cut is visible without the 0.35 name cap. Tilt 0.  
+**Lesson:** equal weight double-counts the factor. The allocator keeps the skew leg at weight 1 and drops the fly. Desk PnL is 0.21. Naive PnL is 0.08265.
+
+`ortho_break` on the desk state asks `merge_sleeve` and `cut_corr_pair`. Code sets the weight. Gatheral and Jacquier, [arXiv:1204.0646](https://arxiv.org/abs/1204.0646).
+
+Tests: `test_ortho_and_multi_product_training_cases`, Zig `orthogonality break keeps the better smile leg`.
+
+## 19. `toxic_multi` (`1.1.0-zig-ortho`)
+
+**Role:** three synthetic names, one negative clone.  
+**Information:** a good series, an unrelated series, and the good series minus 0.07. Names `EQ_INDEX`, `EQ_SINGLE`, `EQ_LOWBETA`. Caps 0.35, tilt 0.  
+**Lesson:** a third name does not rescue a negative copy. Desk weights are 0.35, 0.35, and 0 (sum 0.70, the rest is cash). Desk PnL is 0.10535. Naive equal weight is 0.03033.
+
+`product_toxic` asks `product_kill`. Code sets the weight. Carr and Wu, [doi:10.1093/rfs/hhn039](https://doi.org/10.1093/rfs/hhn039).
+
+Tests: `test_ortho_and_multi_product_training_cases`, Zig `orthogonality break keeps the better smile leg` (the same test calls the multi-name case).
 
 ## What this is not
 
