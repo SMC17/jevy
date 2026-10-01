@@ -19,7 +19,9 @@ def main() -> None:
         f"fits={run.n_fits} suspect_slices={run.suspect_fits} "
         f"products={len(board.products)} sleeves={len(board.rows)} "
         f"pre_gate_max_|ρ|={board.pre_gate_max_abs_rho:.4f} "
-        f"post_gate_max_|ρ|={board.max_abs_rho:.4f}"
+        f"post_gate_max_|ρ|={board.max_abs_rho:.4f} "
+        f"raw_resid_sharpe={board.desk_sharpe_raw:.4f} "
+        f"penalized_resid_sharpe={board.desk_sharpe_residual:.4f}"
     )
     report = multi_seed_corr()
     print(

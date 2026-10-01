@@ -309,6 +309,172 @@ pub fn pearson(a: []const f64, b: []const f64) f64 {
     return cov / (@sqrt(va) * @sqrt(vb));
 }
 
+pub const Smoothness = struct {
+    ac1: f64 = 0,
+    dc_share: f64 = 0,
+    const_trend_r2: f64 = 0,
+    low_freq_share: f64 = 0,
+    penalty: f64 = 1,
+    /// 0 ok, 1 smooth, 2 flat. A flat residual is a constant leftover.
+    flag: u8 = 0,
+};
+
+fn seriesMean(x: []const f64) f64 {
+    if (x.len == 0) return 0;
+    var s: f64 = 0;
+    for (x) |v| s += v;
+    return s / @as(f64, @floatFromInt(x.len));
+}
+
+fn sampleRawStd(x: []const f64) f64 {
+    if (x.len < 2) return 0;
+    const m = seriesMean(x);
+    var ss: f64 = 0;
+    for (x) |v| {
+        const d = v - m;
+        ss += d * d;
+    }
+    return @sqrt(@max(ss / @as(f64, @floatFromInt(x.len - 1)), 0));
+}
+
+pub fn residualAc1(x: []const f64) f64 {
+    if (x.len < 3) return 0;
+    const m = seriesMean(x);
+    var den: f64 = 0;
+    var num: f64 = 0;
+    var i: usize = 0;
+    while (i < x.len) : (i += 1) {
+        const d = x[i] - m;
+        den += d * d;
+        if (i + 1 < x.len) num += d * (x[i + 1] - m);
+    }
+    if (den <= 1e-18) return 0;
+    return num / den;
+}
+
+/// Share of uncentered energy in the lowest Fourier bin (the sample mean).
+pub fn dcShare(x: []const f64) f64 {
+    if (x.len == 0) return 0;
+    var ss: f64 = 0;
+    for (x) |v| ss += v * v;
+    if (ss <= 1e-18) return 0;
+    const m = seriesMean(x);
+    return @as(f64, @floatFromInt(x.len)) * m * m / ss;
+}
+
+/// R² of `x ~ a + b t` against a zero baseline. A near-constant scores high.
+pub fn constTrendR2(x: []const f64) f64 {
+    const n = x.len;
+    if (n < 3) return 0;
+    const nf = @as(f64, @floatFromInt(n));
+    const sum_t = nf * (nf - 1.0) / 2.0;
+    const sum_t2 = (nf - 1.0) * nf * (2.0 * nf - 1.0) / 6.0;
+    var sum_x: f64 = 0;
+    var sum_tx: f64 = 0;
+    var t: usize = 0;
+    while (t < n) : (t += 1) {
+        sum_x += x[t];
+        sum_tx += @as(f64, @floatFromInt(t)) * x[t];
+    }
+    const det = nf * sum_t2 - sum_t * sum_t;
+    if (@abs(det) < 1e-18) return 0;
+    const a = (sum_t2 * sum_x - sum_t * sum_tx) / det;
+    const b = (nf * sum_tx - sum_t * sum_x) / det;
+    var ss: f64 = 0;
+    var sse: f64 = 0;
+    t = 0;
+    while (t < n) : (t += 1) {
+        const yhat = a + b * @as(f64, @floatFromInt(t));
+        const e = x[t] - yhat;
+        ss += x[t] * x[t];
+        sse += e * e;
+    }
+    if (ss <= 1e-18) return 0;
+    return 1.0 - sse / ss;
+}
+
+/// Share of demeaned power in the lowest positive Fourier bin.
+pub fn lowFreqShare(x: []const f64) f64 {
+    const n = x.len;
+    if (n < 4) return 0;
+    const m = seriesMean(x);
+    const nf = @as(f64, @floatFromInt(n));
+    const nbin = n / 2;
+    var total: f64 = 0;
+    var first: f64 = 0;
+    var k: usize = 1;
+    while (k <= nbin) : (k += 1) {
+        var re: f64 = 0;
+        var im: f64 = 0;
+        const ang = 2.0 * std.math.pi * @as(f64, @floatFromInt(k)) / nf;
+        var t: usize = 0;
+        while (t < n) : (t += 1) {
+            const c = x[t] - m;
+            const th = ang * @as(f64, @floatFromInt(t));
+            re += c * @cos(th);
+            im -= c * @sin(th);
+        }
+        const pwr = re * re + im * im;
+        if (k == 1) first = pwr;
+        total += pwr;
+    }
+    if (total <= 1e-18) return 0;
+    return first / total;
+}
+
+/// Penalty in [0, 1]. Zero when the residual is a constant the strip created.
+///
+/// Flat: sample σ < 1e-5, or DC share ≥ 0.95 and at least 0.40 above the raw
+/// series. Smooth: DC, lag-1, or low-frequency share is high relative to raw.
+/// Otherwise the penalty is 1 (identity).
+pub fn smoothnessPenalty(resid: []const f64, raw: []const f64) Smoothness {
+    var out = Smoothness{};
+    out.ac1 = residualAc1(resid);
+    out.dc_share = dcShare(resid);
+    out.const_trend_r2 = constTrendR2(resid);
+    out.low_freq_share = lowFreqShare(resid);
+    const raw_ac = residualAc1(raw);
+    const raw_dc = dcShare(raw);
+    const raw_ct = constTrendR2(raw);
+    const raw_lf = lowFreqShare(raw);
+    if (sampleRawStd(resid) < FLAT_STD) {
+        out.penalty = 0;
+        out.flag = 2;
+        return out;
+    }
+    if (out.dc_share >= 0.95 and (out.dc_share - raw_dc) >= 0.40) {
+        out.penalty = 0;
+        out.flag = 2;
+        return out;
+    }
+    var penalty: f64 = 1;
+    var flag: u8 = 0;
+    if (out.dc_share >= 0.85 and (out.dc_share - raw_dc) >= 0.25) {
+        const span = (out.dc_share - 0.85) / 0.10;
+        const clipped = @min(@max(span, 0), 1);
+        penalty = @min(penalty, @max(0.05, 1.0 - 0.95 * clipped));
+        flag = 1;
+    }
+    if (out.ac1 >= 0.70 and (out.ac1 - raw_ac) >= 0.30) {
+        const span = @min(@max((out.ac1 - 0.70) / 0.25, 0), 1);
+        penalty = @min(penalty, @max(0.05, 1.0 - 0.90 * span));
+        flag = 1;
+    }
+    if (out.low_freq_share >= 0.45 and (out.low_freq_share - raw_lf) >= 0.20) {
+        const span = @min(@max((out.low_freq_share - 0.45) / 0.40, 0), 1);
+        penalty = @min(penalty, @max(0.05, 1.0 - 0.80 * span));
+        flag = 1;
+    }
+    if (out.const_trend_r2 >= 0.90 and (out.const_trend_r2 - raw_ct) >= 0.40) {
+        const span = @min(@max((out.const_trend_r2 - 0.90) / 0.08, 0), 1);
+        penalty = @min(penalty, @max(0.05, 1.0 - 0.90 * span));
+        flag = 1;
+    }
+    out.penalty = penalty;
+    out.flag = flag;
+    return out;
+}
+
 fn meanStd(x: []const f64) struct { mean: f64, std: f64, raw: f64 } {
     if (x.len == 0) return .{ .mean = 0, .std = 1, .raw = 0 };
     var s: f64 = 0;
@@ -341,37 +507,74 @@ fn meanStd(x: []const f64) struct { mean: f64, std: f64, raw: f64 } {
 /// 6. Cap any weight at `max_weight` and push the excess onto uncapped
 ///    positive weights. If every survivor is capped, the leftover is cash
 ///    (weights sum to less than 1).
-pub fn allocateInverseVol(
+fn linearQuantile(sorted: []const f64, q: f64) f64 {
+    if (sorted.len == 0) return 0;
+    if (sorted.len == 1) return sorted[0];
+    const pos = q * @as(f64, @floatFromInt(sorted.len - 1));
+    const lo: usize = @intFromFloat(@floor(pos));
+    const hi = @min(lo + 1, sorted.len - 1);
+    const w = pos - @floor(pos);
+    return sorted[lo] * (1.0 - w) + sorted[hi] * w;
+}
+
+/// Inverse-vol weights. `sigma_clip_q` in (0, 1) caps σ at that percentile
+/// of the enabled panel before the `1/σ` step. `0` leaves σ unchanged.
+/// Sharpe tilt still uses the unclipped sample σ.
+pub fn allocateInverseVolClipped(
     resid: []const []const f64,
     enabled: []const bool,
     max_weight: f64,
     corr_cap: f64,
     sharpe_tilt: f64,
+    sigma_clip_q: f64,
     out_w: []f64,
 ) void {
     const n = @min(resid.len, out_w.len);
     var inv: [MAX_SLEEVES]f64 = .{0} ** MAX_SLEEVES;
     var means: [MAX_SLEEVES]f64 = .{0} ** MAX_SLEEVES;
+    var raw_std: [MAX_SLEEVES]f64 = .{0} ** MAX_SLEEVES;
+    var floored: [MAX_SLEEVES]f64 = .{0} ** MAX_SLEEVES;
     var rho: [MAX_SLEEVES][MAX_SLEEVES]f64 = .{.{0} ** MAX_SLEEVES} ** MAX_SLEEVES;
     var on: [MAX_SLEEVES]bool = .{false} ** MAX_SLEEVES;
     const m = @min(n, MAX_SLEEVES);
     var i: usize = 0;
     while (i < n) : (i += 1) out_w[i] = 0;
+    var panel: [MAX_SLEEVES]f64 = .{0} ** MAX_SLEEVES;
+    var n_panel: usize = 0;
     i = 0;
     while (i < m) : (i += 1) {
         on[i] = i < enabled.len and enabled[i];
         const ms = meanStd(resid[i]);
         means[i] = ms.mean;
+        raw_std[i] = ms.raw;
+        floored[i] = ms.std;
         rho[i][i] = 1;
         if (on[i] and ms.raw >= FLAT_STD) {
-            var sharpe = ms.mean / ms.raw;
+            panel[n_panel] = ms.raw;
+            n_panel += 1;
+        }
+    }
+    var clip: f64 = 0;
+    var use_clip = sigma_clip_q > 0.0 and sigma_clip_q < 1.0 and n_panel > 0;
+    if (use_clip) {
+        var tmp: [MAX_SLEEVES]f64 = panel;
+        std.mem.sort(f64, tmp[0..n_panel], {}, std.sort.asc(f64));
+        clip = linearQuantile(tmp[0..n_panel], sigma_clip_q);
+        if (!(clip > 0.0)) use_clip = false;
+    }
+    i = 0;
+    while (i < m) : (i += 1) {
+        if (on[i] and raw_std[i] >= FLAT_STD) {
+            var sharpe = means[i] / raw_std[i];
             if (sharpe < 0.0) sharpe = 0.0;
             var boost = 1.0 + sharpe_tilt * sharpe;
             if (boost > TILT_CAP) boost = TILT_CAP;
             // Negative residual mean is down-weighted. The hard zero is the
             // correlated-loser cut below.
-            if (ms.mean < 0.0) boost *= 0.25;
-            inv[i] = boost / ms.std;
+            if (means[i] < 0.0) boost *= 0.25;
+            var den = floored[i];
+            if (use_clip) den = @min(den, @max(clip, 1e-8));
+            inv[i] = boost / den;
         }
     }
     i = 0;
@@ -435,6 +638,56 @@ pub fn allocateInverseVol(
         while (i < m) : (i += 1) {
             if (out_w[i] > 0.0 and !capped[i]) out_w[i] += excess * (out_w[i] / free_sum);
         }
+    }
+}
+
+pub fn allocateInverseVol(
+    resid: []const []const f64,
+    enabled: []const bool,
+    max_weight: f64,
+    corr_cap: f64,
+    sharpe_tilt: f64,
+    out_w: []f64,
+) void {
+    allocateInverseVolClipped(resid, enabled, max_weight, corr_cap, sharpe_tilt, 0.0, out_w);
+}
+
+/// Lift eligible weights up to `floor`, funded by weights sitting above it.
+/// Does not push any weight above `max_weight`. Sum is unchanged when the
+/// donors can pay. A floor of 0 is the identity.
+pub fn applyMinWeightFloor(
+    w: []f64,
+    eligible: []const bool,
+    floor: f64,
+    max_weight: f64,
+) void {
+    if (!(floor > 0.0) or w.len == 0) return;
+    const m = @min(w.len, MAX_SLEEVES);
+    const cap = @min(floor, max_weight);
+    var need: f64 = 0;
+    var i: usize = 0;
+    while (i < m) : (i += 1) {
+        const on = i < eligible.len and eligible[i];
+        if (!on) continue;
+        if (w[i] < cap) {
+            need += cap - w[i];
+            w[i] = cap;
+        }
+    }
+    var guard: usize = 0;
+    while (need > 1e-12 and guard < MAX_SLEEVES) : (guard += 1) {
+        var free: f64 = 0;
+        i = 0;
+        while (i < m) : (i += 1) {
+            if (w[i] > cap + 1e-15) free += w[i] - cap;
+        }
+        if (!(free > 1e-15)) break;
+        const take = @min(need, free);
+        i = 0;
+        while (i < m) : (i += 1) {
+            if (w[i] > cap + 1e-15) w[i] -= take * ((w[i] - cap) / free);
+        }
+        need -= take;
     }
 }
 
@@ -526,6 +779,46 @@ test "sharpe tilt raises the higher-sharpe sleeve" {
     allocateInverseVol(series[0..], &enabled, 1.0, 0.99, 1.0, &tilted);
     try std.testing.expect(tilted[0] > plain[0]);
     try std.testing.expectApproxEqAbs(tilted[0] + tilted[1], 1.0, 1e-9);
+}
+
+test "smoothness penalty zeros a constant leftover and keeps white noise" {
+    const flat = [_]f64{ 0.20, 0.201, 0.199, 0.2005, 0.1995, 0.2002, 0.1998, 0.2001 };
+    const noisy = [_]f64{ 0.04, -0.02, 0.03, -0.05, 0.01, -0.04, 0.02, -0.01 };
+    const sm = smoothnessPenalty(&flat, &noisy);
+    try std.testing.expect(sm.dc_share > 0.95);
+    try std.testing.expectEqual(@as(u8, 2), sm.flag);
+    try std.testing.expectApproxEqAbs(sm.penalty, 0.0, 1e-12);
+    const white = [_]f64{ 0.02, -0.01, 0.03, -0.02, 0.01, -0.03, 0.02, -0.015 };
+    const ok = smoothnessPenalty(&white, &white);
+    try std.testing.expectEqual(@as(u8, 0), ok.flag);
+    try std.testing.expectApproxEqAbs(ok.penalty, 1.0, 1e-12);
+}
+
+test "sigma clip gives a noisy sleeve more weight than raw inverse-vol" {
+    const calm = [_]f64{ 0.02, 0.021, 0.019, 0.020, 0.022, 0.018 };
+    const jumpy = [_]f64{ 0.40, -0.20, 0.35, -0.30, 0.50, -0.10 };
+    const series = [_][]const f64{ &calm, &jumpy };
+    const enabled = [_]bool{ true, true };
+    var plain: [2]f64 = .{ 0, 0 };
+    var clipped: [2]f64 = .{ 0, 0 };
+    allocateInverseVol(series[0..], &enabled, 1.0, 0.99, 0.0, &plain);
+    allocateInverseVolClipped(series[0..], &enabled, 1.0, 0.99, 0.0, 0.0, &clipped);
+    try std.testing.expectApproxEqAbs(plain[0], clipped[0], 1e-12);
+    var q: [2]f64 = .{ 0, 0 };
+    allocateInverseVolClipped(series[0..], &enabled, 1.0, 0.99, 0.0, 0.50, &q);
+    try std.testing.expect(q[1] > plain[1]);
+    try std.testing.expect(q[0] + q[1] <= 1.0 + 1e-9);
+    try std.testing.expect(q[0] <= 1.0 + 1e-9);
+}
+
+test "min weight floor lifts the small sleeve and keeps the sum" {
+    var w = [_]f64{ 0.34, 0.65, 0.01 };
+    const eligible = [_]bool{ false, false, true };
+    applyMinWeightFloor(&w, &eligible, 0.02, 0.35);
+    try std.testing.expectApproxEqAbs(w[2], 0.02, 1e-12);
+    try std.testing.expectApproxEqAbs(w[0] + w[1] + w[2], 1.0, 1e-9);
+    try std.testing.expect(w[0] <= 0.35 + 1e-12);
+    try std.testing.expect(w[1] <= 0.65 + 1e-12);
 }
 
 test "disabled sleeve stays at weight zero" {
