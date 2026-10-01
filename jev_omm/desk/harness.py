@@ -44,6 +44,7 @@ from jev_omm.desk.scoreboard import (
     to_markdown,
 )
 from jev_omm.desk.sleeves import LEGACY_SLEEVE_IDS, RISK_BUDGET, SLEEVE_IDS, SleeveContext, quote_or_target
+from jev_omm.execution.executable import attribute_sleeve_fill
 from jev_omm.pnl.residual import pearson, spearman, strip_factors, strip_residual
 from jev_omm.surface.book import SurfaceBook, quotes_from_svi
 from jev_omm.surface.rough_vol import rough_bergomi_variance
@@ -66,6 +67,22 @@ RESEARCH_SLEEVES: tuple[str, ...] = (
     "vanna_tilt",
     "queue_sniper",
     "rough_vol_stress",
+)
+# Sleeves the 1.2 baseline walk-forward killed. Off on the paper desk.
+# ``legacy_honest_config`` turns the book back on for the 1.2 regression.
+LEAN_OFF: tuple[str, ...] = (
+    "parity_box",
+    "roll_yield",
+    "cot_fade_sleeve",
+    "warehouse_autocall",
+    "box_rate",
+)
+SURVIVOR_SLEEVES: tuple[str, ...] = (
+    "mm_spread",
+    "sticky_regime",
+    "vanna_tilt",
+    "queue_sniper",
+    "charm_bleed",
 )
 
 
@@ -113,6 +130,12 @@ class DeskConfig:
     # Peak of |sum of targets| across products. 0 disables that leg.
     inventory_cap: float = 30.0
     walkforward_kill: bool = True
+    # 1.3 executable fills. ``lean_book`` drops the sleeves 1.2 killed.
+    # ``executable_fills=False`` leaves fill PnL, join rate, and markout at 0.
+    lean_book: bool = True
+    executable_fills: bool = True
+    fill_model: str = "lob"
+    queue_edge: bool = True
 
 
 @dataclass
@@ -523,6 +546,10 @@ def _risk_scale(
 
 
 def _enabled(cfg: DeskConfig, sleeve_id: str) -> bool:
+    if cfg.enabled is not None and sleeve_id in cfg.enabled:
+        return bool(cfg.enabled[sleeve_id])
+    if cfg.lean_book and sleeve_id in LEAN_OFF:
+        return False
     if cfg.enabled is None:
         return True
     return bool(cfg.enabled.get(sleeve_id, True))
@@ -569,6 +596,11 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
     g_by_product = {s: {p: np.zeros(n) for p in cfg.products} for s in sleeves}
     fills_n = {s: 0 for s in sleeves}
     fees = {s: 0.0 for s in sleeves}
+    lob_fills = {s: 0.0 for s in sleeves}
+    join_hits = {s: 0.0 for s in sleeves}
+    quote_steps = {s: 0 for s in sleeves}
+    adverse_mo = {s: 0.0 for s in sleeves}
+    fill_pnl = {s: 0.0 for s in sleeves}
     prev = {(p, s): 0.0 for p in cfg.products for s in sleeves}
     prev_quote = {(p, s): (0.0, 1.0) for p in cfg.products for s in sleeves}
     turnover = {s: 0.0 for s in sleeves}
@@ -697,6 +729,33 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
                     d_vrp=float(path.d_vrp[t]),
                 )
                 quote = quote_or_target(sleeve_id, ctx, fee_rate=fee_rate)
+                if (
+                    cfg.executable_fills
+                    and cfg.fill_model == "lob"
+                    and quote.enabled
+                ):
+                    if sleeve_id == "queue_sniper":
+                        fill_book = "sniper"
+                    elif sleeve_id == "flow_toxicity":
+                        fill_book = "flow"
+                    else:
+                        fill_book = "touch"
+                    attr = attribute_sleeve_fill(
+                        spread_mult=quote.spread_mult,
+                        size_mult=quote.size_mult,
+                        target=quote.target,
+                        queue=float(path.queue[t]),
+                        toxic=float(path.tox[t]),
+                        queue_edge=cfg.queue_edge,
+                        fee_per_contract=fee_rate,
+                        book=fill_book,
+                    )
+                    quote_steps[sleeve_id] += 1
+                    join_hits[sleeve_id] += attr.joined
+                    if not block_fills:
+                        lob_fills[sleeve_id] += attr.fills
+                        adverse_mo[sleeve_id] += attr.adverse_markout
+                        fill_pnl[sleeve_id] += attr.fill_pnl
                 pending.append((pid, sleeve_id, quote))
                 step_delta += quote.delta
                 step_gamma += quote.gamma
@@ -1025,6 +1084,14 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
                 capacity_scale=capacity_scale[sleeve_id],
                 test_mean_residual=test_mu,
                 sleeve_kill=sleeve_id in kills,
+                lob_fills=float(lob_fills[sleeve_id]),
+                join_rate=(
+                    float(join_hits[sleeve_id] / quote_steps[sleeve_id])
+                    if quote_steps[sleeve_id]
+                    else 0.0
+                ),
+                adverse_markout=float(adverse_mo[sleeve_id]),
+                fill_pnl=float(fill_pnl[sleeve_id]),
             )
         )
         if fit.r2 < 0.15 and enabled_map[sleeve_id]:
@@ -1138,6 +1205,18 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
             f"Offline Jev answered `{adj.reason}` (kill={adj.kill}, product_kill={adj.product_kill}). "
             "Choice / Noul only. Jev does not emit an order."
         )
+    desk_fill_pnl = float(sum(weights[s] * fill_pnl[s] for s in sleeves))
+    desk_lob_fills = float(sum(lob_fills.values()))
+    desk_adverse = float(sum(adverse_mo.values()))
+    quoted_total = int(sum(quote_steps.values()))
+    desk_join = float(sum(join_hits.values()) / quoted_total) if quoted_total else 0.0
+    if cfg.executable_fills and cfg.fill_model == "lob":
+        notes.append(
+            f"LOB fill path on. Queue edge {'on' if cfg.queue_edge else 'off'}. "
+            f"Unweighted lob fills {desk_lob_fills:.2f}, weighted fill PnL {desk_fill_pnl:.4f}, "
+            f"adverse markout {desk_adverse:.4f}. Fill PnL is not inside the residual Sharpe. "
+            "Intensity is contracts per second over a 60-second horizon. synthetic_fixture=1."
+        )
     notes.append("Quotes are synthetic. synthetic_fixture=1. This is not an OPRA surface.")
     if worst_label != "flat":
         notes.append(f"End-of-path scenario grid worst PnL {worst:.4f} at {worst_label}.")
@@ -1174,6 +1253,10 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
         stress_worst=worst,
         stress_label=worst_label,
         notes=notes,
+        desk_fill_pnl=desk_fill_pnl,
+        desk_lob_fills=desk_lob_fills,
+        desk_adverse_markout=desk_adverse,
+        desk_join_rate=desk_join,
     )
     md = to_markdown(board, title="Sleeve residual correlation")
     return DeskRun(
@@ -1305,7 +1388,30 @@ def legacy_config(**overrides: object) -> DeskConfig:
         gate_threshold=0.50,
         regime="baseline",
         fit_surfaces=False,
+        lean_book=False,
+        executable_fills=False,
+        queue_edge=False,
+        fill_model="off",
         **_honesty_off(),
+    )
+    for key, value in overrides.items():
+        setattr(cfg, key, value)
+    return cfg
+
+
+def legacy_honest_config(**overrides: object) -> DeskConfig:
+    """1.2.0-zig-honest book. Full sleeve set, honesty on, fills not executable.
+
+    The smoothness penalty, σ clip, floor, capacity caps, walk-forward kill,
+    and roll/vanna split stay on. ``lean_book`` and the LOB fill columns stay
+    off so this reprints the 1.2 residual scoreboard.
+    """
+    cfg = DeskConfig(
+        fit_surfaces=False,
+        lean_book=False,
+        executable_fills=False,
+        queue_edge=False,
+        fill_model="off",
     )
     for key, value in overrides.items():
         setattr(cfg, key, value)
@@ -1323,6 +1429,10 @@ def legacy_ortho_config(**overrides: object) -> DeskConfig:
     """
     cfg = DeskConfig(
         fit_surfaces=False,
+        lean_book=False,
+        executable_fills=False,
+        queue_edge=False,
+        fill_model="off",
         **_honesty_off(),
     )
     for key, value in overrides.items():

@@ -1,6 +1,6 @@
 # Desk honesty
 
-**Version:** `1.2.0-zig-honest`  
+**Version:** `1.2.0-zig-honest` (penalties unchanged in `1.3.0-zig-fills`; see [EXECUTABLE_FILLS.md](./EXECUTABLE_FILLS.md))  
 **Code:** `jev_omm/desk/honesty.py`, `jev_omm/desk/allocator.py`, `jev_omm/desk/harness.py`, `jev_omm/desk/falsify.py`, `zig/src/desk.zig` (`smoothnessPenalty`, `allocateInverseVolClipped`).  
 **Mode:** paper. `synthetic_fixture=1` on every synthetic row. No live broker, no order. Jev answers Choice / Noul and does not emit an order.
 
@@ -89,7 +89,7 @@ A sleeve "keeps a positive penalized mean" when that mean, after the penalty, is
 
 Walk-forward kill: second-half residual mean ≤ 0 zeros the sleeve. The offline fallback is asked `sleeve_kill` with `desk.edge_fail` set. A product whose second-half raw PnL is ≤ 0 raises `product_kill` via `product_edge_fail`. The product is flagged and left in the synthetic book. Neither answer is an order.
 
-Local tape: the checked-in fixture `tape_synthetic.csv` (`synthetic_fixture=1`, symbol `SYNTH`) and the no-account Databento preview (`sha256 b8ed8988…`, 20 rows, spot missing, not a fixture). Model quoters post wider than those books and receive zero fills. Fixed-spread and join-touch are the ones that trade. Detail is in the ablation. No OPRA print was invented. `CRYPTO_BETA` is still `crypto_synthetic`.
+Local tape: the checked-in fixture `tape_synthetic.csv` (`synthetic_fixture=1`, symbol `SYNTH`) and the no-account Databento preview (`sha256 b8ed8988…`, 20 rows, spot missing, not a fixture). On the 0.9 print rule, model quoters post wider than those books and receive zero fills. Fixed-spread and join-touch are the ones that trade. `1.3.0-zig-fills` keeps that print rule as a regression and adds a touch-unit LOB replay in [EXECUTABLE_FILLS.md](./EXECUTABLE_FILLS.md). No OPRA print was invented. `CRYPTO_BETA` is still `crypto_synthetic`.
 
 ## What this file is not
 

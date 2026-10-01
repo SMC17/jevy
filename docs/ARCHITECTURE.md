@@ -260,7 +260,11 @@ greek strip
         → soft caps on gross turnover and peak |inventory|
 ```
 
-`legacy_ortho_config()` reprints the 1.1 book (no penalty, no clip, no floor, no caps, no roll/vanna split). `legacy_config()` still reprints the 1.0 correlations. The raw per-step residual Sharpe is reported and then penalized. It is not annualized and it is not a capacity. See [DESK_HONESTY.md](./DESK_HONESTY.md) and [ablation_desk_honest.md](./ablation_desk_honest.md).
+`legacy_ortho_config()` reprints the 1.1 book (no penalty, no clip, no floor, no caps, no roll/vanna split). `legacy_config()` still reprints the 1.0 correlations. `legacy_honest_config()` reprints the 1.2 residual book. The raw per-step residual Sharpe is reported and then penalized. It is not annualized and it is not a capacity. See [DESK_HONESTY.md](./DESK_HONESTY.md) and [ablation_desk_honest.md](./ablation_desk_honest.md).
+
+## 6g. Executable fills (`1.3.0-zig-fills`)
+
+The tape walk and the paper desk default to `fill_model=lob`. A classical half-spread of about 0.64 price units does not trade on a book whose touch is about 0.05. `kappa_for_touch` puts that half-spread on the train-window touch. The quote is posted inside the spread when it is tighter, and behind displayed size when it joins. `queue_edge=False` is the identity stay. Missing spot stays missing; the quote mid is the CBBO. See [EXECUTABLE_FILLS.md](./EXECUTABLE_FILLS.md) and [ablation_fills.md](./ablation_fills.md).
 
 Offline questions add `sleeve_kill`, answered when `desk.edge_fail` is set. `product_edge_fail` raises `product_kill`. Both are flags. Jev does not emit an order.
 
