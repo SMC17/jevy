@@ -1,6 +1,6 @@
 # Sleeves
 
-**Version:** `1.2.0-zig-honest`  
+**Version:** `1.3.0-zig-fills` (sleeve formulas unchanged from `1.2.0-zig-honest`)  
 **Code:** `jev_omm/desk/sleeves.py`, `jev_omm/desk/allocator.py`, `jev_omm/desk/orthogonal.py`, `zig/src/desk.zig` (`allocateInverseVol`).  
 **Mode:** paper targets and paper PnL. `quote_or_target` does not send an order.
 

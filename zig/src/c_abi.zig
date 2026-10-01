@@ -15,6 +15,7 @@ const combos = @import("combos.zig");
 const hedge = @import("hedge.zig");
 const scenario = @import("scenario.zig");
 const desk = @import("desk.zig");
+const lob = @import("lob.zig");
 
 pub const CGreeks = extern struct {
     delta: f64,
@@ -1052,7 +1053,45 @@ export fn jev_omm_allocate_inverse_vol(
     while (i < m) : (i += 1) out_w[i] = w[i];
 }
 
+export fn jev_omm_kappa_for_touch(gamma: f64, target_half: f64, kappa_prior: f64) callconv(.c) f64 {
+    return lob.kappaForTouch(gamma, target_half, kappa_prior);
+}
+
+export fn jev_omm_queue_decision(
+    ahead: f64,
+    our_size: f64,
+    trade_intensity: f64,
+    cancel_ahead: f64,
+    horizon: f64,
+    spread_capture: f64,
+    adverse_per_fill: f64,
+    toxic_flow: f64,
+    queue_edge: u8,
+    out_action: *u8,
+    out_ahead: *f64,
+    out_latency: *f64,
+    out_spread_mult: *f64,
+    out_size_mult: *f64,
+) callconv(.c) void {
+    const d = lob.queueDecision(
+        ahead,
+        our_size,
+        trade_intensity,
+        cancel_ahead,
+        horizon,
+        spread_capture,
+        adverse_per_fill,
+        toxic_flow,
+        queue_edge != 0,
+    );
+    out_action.* = d.action;
+    out_ahead.* = d.ahead;
+    out_latency.* = d.cancel_latency;
+    out_spread_mult.* = d.spread_mult;
+    out_size_mult.* = d.size_mult;
+}
+
 export fn jev_omm_version() callconv(.c) [*:0]const u8 {
-    return "1.2.0-zig-honest";
+    return "1.3.0-zig-fills";
 }
 

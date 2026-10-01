@@ -21,7 +21,10 @@ def main() -> None:
         f"pre_gate_max_|ρ|={board.pre_gate_max_abs_rho:.4f} "
         f"post_gate_max_|ρ|={board.max_abs_rho:.4f} "
         f"raw_resid_sharpe={board.desk_sharpe_raw:.4f} "
-        f"penalized_resid_sharpe={board.desk_sharpe_residual:.4f}"
+        f"penalized_resid_sharpe={board.desk_sharpe_residual:.4f} "
+        f"lob_fills={board.desk_lob_fills:.1f} "
+        f"fill_pnl={board.desk_fill_pnl:.4f} "
+        f"adverse_markout={board.desk_adverse_markout:.4f}"
     )
     report = multi_seed_corr()
     print(
