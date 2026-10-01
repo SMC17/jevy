@@ -1,6 +1,6 @@
 # Residual PnL
 
-**Version:** `1.1.0-zig-ortho`  
+**Version:** `1.1.0-zig-ortho` for the strip below. The 1.2 smoothness penalty is in [DESK_HONESTY.md](./DESK_HONESTY.md). The raw per-step Sharpe is still mean / sample std. It is not annualized, and a flat leftover is not a capacity.  
 **Code:** `jev_omm/pnl/residual.py` (`strip_residual`, `strip_factors`), `zig/src/desk.zig` (`stripResidual`, `stripResidualFactors`), `jev_omm/hedge/delta.py` (`greek_pnl_step`).
 
 The research object is the sleeve's period PnL after the comovement with spot and with the greek buckets has been removed. Raw PnL is still reported. A strip that does not explain the variance is reported with a low R².
@@ -94,3 +94,7 @@ Eight products, twenty sleeves, six-column strip, seed 11, 80 steps. The full we
 | `charm_bleed` | 0.004 | Almost none of the weekend bleed is in the greek columns. Weight 0.091, per-step residual Sharpe 1.80. |
 
 R² above 0.70 means most of the variance sits in the factor strip. R² under 0.15 means the strip is not the story. Both sentences are on the scoreboard when they apply. The desk residual PnL on this path is 4.143 against raw 0.814, per-step residual Sharpe 6.57, residual max drawdown 0. The Sharpe is the flow sleeve plus a few quiet positive means. One synthetic path.
+
+## What 1.2 does with that 10.65
+
+The 10.65 is still the raw number on seed 11. `flow_toxicity`'s residual has DC share 0.991 against a raw-series DC share of 0.050: the strip left a near-constant. AC(1) of the demeaned residual is only 0.066, so a lag-1 test alone does not see it. The penalty uses the uncentered DC bin, which is the constant. On seed 11 the flag is `flat`, the penalty is 0, and the weight is 0. The penalized Sharpe is 0. The raw 10.65 stays on the scoreboard so the leftover is visible. It is not a capacity. Across the fifteen-path grid the same sleeve is flat on 5 paths, smooth on 8, and unmarked on 2. Mean penalized per-step Sharpe is 0.68. Mean weight is 0.024.

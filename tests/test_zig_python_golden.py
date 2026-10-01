@@ -126,7 +126,7 @@ def test_version_string():
     lib = _lib()
     raw = lib.jev_omm_version()
     text = raw.decode() if isinstance(raw, bytes) else str(raw)
-    assert text == "1.1.0-zig-ortho"
+    assert text == "1.2.0-zig-honest"
 
 
 def test_bs_greeks_randomized():
