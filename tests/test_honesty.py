@@ -16,6 +16,7 @@ from jev_omm.desk.harness import (
     RESEARCH_SLEEVES,
     DeskConfig,
     legacy_config,
+    legacy_honest_config,
     legacy_ortho_config,
     pair_rho,
     run_desk,
@@ -128,7 +129,7 @@ def test_legacy_ortho_reprints_the_roll_vanna_failure_and_honest_shrinks_it():
     flow = next(row for row in before.scoreboard.rows if row.sleeve_id == "flow_toxicity")
     assert flow.weight > 0.15
     assert flow.residual_sharpe_raw > 5.0 or flow.sharpe_residual > 5.0
-    after = run_desk(DeskConfig(n_steps=80, seed=11, fit_surfaces=False))
+    after = run_desk(legacy_honest_config(n_steps=80, seed=11))
     rho_after = pair_rho(after, "roll_yield", "vanna_tilt")
     assert rho_after is not None
     assert abs(rho_after) < abs(rho_before)

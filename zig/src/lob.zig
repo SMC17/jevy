@@ -396,6 +396,137 @@ test "cancels ahead shorten time to first fill without counting as our fill" {
     try std.testing.expect(@abs(fills - 5.0) < 1e-9);
 }
 
+/// κ such that the Avellaneda–Stoikov intensity half-spread equals `target_half`.
+///
+/// δ = (1/γ) ln(1 + γ/κ)  ⇒  κ = γ / (exp(γ δ) − 1).
+/// Non-positive γ or δ returns `kappa_prior` (identity).
+pub fn kappaForTouch(gamma: f64, target_half: f64, kappa_prior: f64) f64 {
+    if (!(gamma > 0.0) or !(target_half > 0.0)) return kappa_prior;
+    const denom = @exp(gamma * target_half) - 1.0;
+    if (!(denom > 1e-18) or !std.math.isFinite(denom)) return kappa_prior;
+    return gamma / denom;
+}
+
+/// 0 stay, 1 improve (ahead → 0), 2 cancel (latency cuts exposure).
+pub const QueueDecision = struct {
+    action: u8 = 0,
+    ahead: f64 = 0.0,
+    /// Negative means no cancel.
+    cancel_latency: f64 = -1.0,
+    spread_mult: f64 = 1.0,
+    size_mult: f64 = 1.0,
+};
+
+/// Join, improve, or cancel. `queue_edge = false` is the identity: stay at `ahead`.
+///
+/// Improving is priced at half the capture (we give up edge to clear the queue).
+/// A cancel fires when both staying and improving have negative value, or when
+/// `toxic_flow` is at least 0.85. Rates are contracts per unit of `horizon`.
+pub fn queueDecision(
+    ahead: f64,
+    our_size: f64,
+    trade_intensity: f64,
+    cancel_ahead: f64,
+    horizon: f64,
+    spread_capture: f64,
+    adverse_per_fill: f64,
+    toxic_flow: f64,
+    queue_edge: bool,
+) QueueDecision {
+    const parked = @max(ahead, 0.0);
+    if (!queue_edge) {
+        return .{
+            .action = 0,
+            .ahead = parked,
+            .cancel_latency = -1.0,
+            .spread_mult = 1.0,
+            .size_mult = 1.0,
+        };
+    }
+    const stay_v = queueValue(
+        spread_capture,
+        adverse_per_fill,
+        parked,
+        our_size,
+        trade_intensity,
+        cancel_ahead,
+        horizon,
+        null,
+    );
+    const imp_v = queueValue(
+        spread_capture * 0.5,
+        adverse_per_fill,
+        0.0,
+        our_size,
+        trade_intensity,
+        cancel_ahead,
+        horizon,
+        null,
+    );
+    if (toxic_flow >= 0.85 or (stay_v < 0.0 and imp_v <= 0.0)) {
+        const lat = @min(@max(horizon, 0.0) * 0.1, @max(horizon, 0.0));
+        return .{
+            .action = 2,
+            .ahead = parked,
+            .cancel_latency = lat,
+            .spread_mult = 1.0,
+            .size_mult = 0.0,
+        };
+    }
+    if (imp_v > stay_v + 1e-12 and imp_v > 0.0) {
+        return .{
+            .action = 1,
+            .ahead = 0.0,
+            .cancel_latency = -1.0,
+            .spread_mult = 0.5,
+            .size_mult = 1.0,
+        };
+    }
+    return .{
+        .action = 0,
+        .ahead = parked,
+        .cancel_latency = -1.0,
+        .spread_mult = 1.0,
+        .size_mult = 1.0,
+    };
+}
+
+test "kappa for touch round-trips the A-S half spread and is the identity when off" {
+    const gamma = 0.12;
+    const target = 0.05;
+    const k = kappaForTouch(gamma, target, 1.5);
+    const half = (1.0 / gamma) * @log(1.0 + gamma / k);
+    try std.testing.expectApproxEqAbs(half, target, 1e-9);
+    try std.testing.expect(k > 1.5);
+    try std.testing.expectApproxEqAbs(kappaForTouch(0.0, target, 1.5), 1.5, 0.0);
+    try std.testing.expectApproxEqAbs(kappaForTouch(gamma, 0.0, 1.5), 1.5, 0.0);
+}
+
+test "queue edge off is the identity and on cancels toxic or improves a dead queue" {
+    const off = queueDecision(4.0, 1.0, 8.0, 0.0, 1.0, 0.02, 0.05, 1.0, false);
+    try std.testing.expect(off.action == 0);
+    try std.testing.expectApproxEqAbs(off.ahead, 4.0, 0.0);
+    try std.testing.expectApproxEqAbs(off.spread_mult, 1.0, 0.0);
+    try std.testing.expectApproxEqAbs(off.size_mult, 1.0, 0.0);
+    try std.testing.expect(off.cancel_latency < 0.0);
+
+    const toxic = queueDecision(0.0, 1.0, 8.0, 0.0, 1.0, 0.02, 0.05, 1.0, true);
+    try std.testing.expect(toxic.action == 2);
+    try std.testing.expect(toxic.cancel_latency > 0.0 and toxic.cancel_latency < 1.0);
+    const full = expectedFills(0.0, 1.0, 8.0, 0.0, 1.0, null);
+    const cut = expectedFills(0.0, 1.0, 8.0, 0.0, 1.0, toxic.cancel_latency);
+    try std.testing.expect(cut < full);
+    try std.testing.expect(cut > 0.0);
+
+    const deep = queueDecision(50.0, 1.0, 5.0, 0.0, 1.0, 0.10, 0.0, 0.0, true);
+    try std.testing.expect(deep.action == 1);
+    try std.testing.expectApproxEqAbs(deep.ahead, 0.0, 0.0);
+    const stuck = expectedFills(50.0, 1.0, 5.0, 0.0, 1.0, null);
+    const front = expectedFills(deep.ahead, 1.0, 5.0, 0.0, 1.0, null);
+    try std.testing.expectApproxEqAbs(stuck, 0.0, 0.0);
+    try std.testing.expect(front > stuck);
+}
+
 test "deeper queue lowers absolute queue value" {
     const shallow = queueValue(0.10, 0.02, 1.0, 5.0, 20.0, 0.0, 1.0, null);
     const deep = queueValue(0.10, 0.02, 30.0, 5.0, 20.0, 0.0, 1.0, null);

@@ -2,7 +2,7 @@
 
 Synthetic paper desk unless a row says otherwise. `synthetic_fixture=1` on synthetic paths. Per-step Sharpe is mean / sample std. It is not annualized. Do not multiply by `√252`. The raw number is not a capacity.
 
-Current desk: `python -m jev_omm.demo_surface_desk` (`1.2.0-zig-honest`). Method: [DESK_HONESTY.md](./DESK_HONESTY.md). The 1.1 table this replaces as the live scoreboard is [ablation_sleeve_corr.md](./ablation_sleeve_corr.md). `legacy_ortho_config()` reprints that book's correlations.
+This table is the `1.2.0-zig-honest` book, reprinted by `legacy_honest_config()`. Method: [DESK_HONESTY.md](./DESK_HONESTY.md). The live paper desk is `1.3.0-zig-fills` (`python -m jev_omm.demo_surface_desk`): the same penalties, with the sleeves 1.2 killed turned off and a LOB fill column. Fill tables are in [ablation_fills.md](./ablation_fills.md). The 1.1 table is [ablation_sleeve_corr.md](./ablation_sleeve_corr.md). `legacy_ortho_config()` reprints that book's correlations.
 
 ## Seed 11, 80 steps, eight products, twenty sleeves
 
@@ -93,6 +93,8 @@ Five seeds, 40 steps, honesty and capacity on. A row is a survivor when the mean
 `sticky_regime`, `vanna_tilt`, and `queue_sniper` keep a positive penalized mean on every regime except `no_fill`. `rough_vol_stress` does too on this 40-step grid, with a small weight. On the 80-step seed-11 path it does not. The longer path is the one in the weight table above.
 
 ## Local tape
+
+The zeros below are the 0.9 print rule (no queue, κ = 1.5). `1.3.0-zig-fills` replays the same files with the touch-unit LOB path in [ablation_fills.md](./ablation_fills.md). Theory gets fills there and still loses to fixed-spread.
 
 No licensed history. Two files, both replayed with the existing 0.9 quoters. Posting rule: join the touch when the model is tighter, sit behind when it is wider, never cross. Fee 0.05 per contract on the preview comparison. Not a venue card.
 
