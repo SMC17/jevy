@@ -1,6 +1,6 @@
 # Sleeves
 
-**Version:** `1.1.0-zig-ortho`  
+**Version:** `1.2.0-zig-honest`  
 **Code:** `jev_omm/desk/sleeves.py`, `jev_omm/desk/allocator.py`, `jev_omm/desk/orthogonal.py`, `zig/src/desk.zig` (`allocateInverseVol`).  
 **Mode:** paper targets and paper PnL. `quote_or_target` does not send an order.
 
@@ -65,7 +65,7 @@ Same function in Python and Zig. On residual PnL, in this order. Defaults: corre
 5. Renormalize survivors to sum to 1.
 6. Cap any weight at 0.35. Excess goes to uncapped positive weights. If every survivor is capped, the rest is cash and the weights sum to less than 1.
 
-Inverse-vol is a risk budget. It is not a sort by residual Sharpe. On the twenty-sleeve seed-11 path the highest per-step residual Sharpe is `flow_toxicity` (10.65, a smooth synthetic spread after the strip) at weight 0.212, and several research sleeves with large residual totals sit near weight 0 because their sample σ is large. No name is at the 0.35 cap on that path. `parity_box` is at the cap on the eight-sleeve three-product book. See [ablation_sleeve_corr.md](./ablation_sleeve_corr.md).
+Inverse-vol is a risk budget. It is not a sort by residual Sharpe. On the 1.1 twenty-sleeve seed-11 path the highest per-step residual Sharpe was `flow_toxicity` (10.65, a smooth synthetic spread after the strip) at weight 0.212, and `sticky_regime`, `vanna_tilt`, `queue_sniper`, and `rough_vol_stress` sat near weight 0 because their sample σ was large. `1.2.0-zig-honest` zeros that flat leftover on seed 11 and gives the three positive-mean research sleeves weight above 0.02. `rough_vol_stress` stays at 0 on that seed because the test-half residual mean is negative. See [DESK_HONESTY.md](./DESK_HONESTY.md) and [ablation_desk_honest.md](./ablation_desk_honest.md). The 1.1 table is in [ablation_sleeve_corr.md](./ablation_sleeve_corr.md).
 
 The 1.0 rule was shrink 0.50 and cap 0.40, with no negative-mean haircut and no Sharpe tilt. `legacy_config()` still passes 0.50 and 0.40. The 0.25 haircut is in the allocator itself, so a legacy replay does not reprint the 1.0 weights. The residual series do reprint.
 
