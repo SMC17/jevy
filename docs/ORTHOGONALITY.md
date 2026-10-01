@@ -1,8 +1,10 @@
 # Orthogonality
 
-**Version:** `1.1.0-zig-ortho`  
+**Version:** `1.1.0-zig-ortho`, kept as the record of that pass. The current desk is `1.2.0-zig-honest`. See [DESK_HONESTY.md](./DESK_HONESTY.md).  
 **Code:** `jev_omm/desk/orthogonal.py`, `jev_omm/desk/harness.py`, `jev_omm/desk/sleeves.py`.  
 **Mode:** paper. Every path below is `synthetic_fixture=1`. No live tape, no order.
+
+`legacy_ortho_config()` still reprints the seed-11 correlations in this file, including `roll_yield` / `vanna_tilt` at −0.363. The 1.2 split takes that pair's fifteen-path mean from −0.136 to −0.0015. The gate thresholds did not move.
 
 `1.0.0-zig-desk` left two residual pairs that were the same economic factor counted twice. This layer splits those factors in the simulator, then runs a hard gate on whatever correlation is still there. The gate is a research control on a synthetic book. It is not a covariance model for a live desk.
 

@@ -163,7 +163,7 @@ def apply_desk_policy(result: SystemOneResult, state: Optional[dict[str, Any]] =
     desk = (state or {}).get("desk") or {}
     if float(desk.get("enabled", 0.0)) < 0.5:
         return DeskAdjustments(1.0, False, "identity")
-    kill_n = _noul(result, "kill_sleeve")
+    kill_n = max(_noul(result, "kill_sleeve"), _noul(result, "sleeve_kill"))
     choice, _conf = _choice(result, "sleeve_weight", "hold")
     merge_choice, _mconf = _choice(result, "merge_sleeve", "keep")
     cut_pair = _noul(result, "cut_corr_pair")

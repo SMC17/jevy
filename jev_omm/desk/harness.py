@@ -30,7 +30,10 @@ from jev_omm.desk.allocator import (
     DEFAULT_MAX_WEIGHT,
     DEFAULT_SHARPE_TILT,
     allocate,
+    apply_min_weight_floor,
+    renorm_cap,
 )
+from jev_omm.desk.honesty import smoothness_penalty
 from jev_omm.desk.fixtures import DEFAULT_PRODUCTS, EXPIRIES, LOG_MONEYNESS, UNDERLIERS, UnderlierSpec
 from jev_omm.desk.orthogonal import enforce_orthogonality, research_pca, residualize_keep_mean
 from jev_omm.desk.scoreboard import (
@@ -49,6 +52,21 @@ _CLIENT = DeterministicFallbackClient()
 
 EVAL_SEEDS: tuple[int, ...] = (11, 23, 42, 7, 99)
 EVAL_REGIMES: tuple[str, ...] = ("baseline", "smile_shock", "jump")
+# Stress paths used to falsify the book. Not part of the correlation grid.
+ADVERSARIAL_REGIMES: tuple[str, ...] = (
+    "smile_shock",
+    "jump",
+    "toxic_flow",
+    "wide_spread",
+    "no_fill",
+)
+# Research sleeves inverse-vol was starving on the 1.1 book.
+RESEARCH_SLEEVES: tuple[str, ...] = (
+    "sticky_regime",
+    "vanna_tilt",
+    "queue_sniper",
+    "rough_vol_stress",
+)
 
 
 @dataclass
@@ -82,6 +100,19 @@ class DeskConfig:
     jev_desk: bool = False
     enabled: dict[str, bool] | None = None
     synthetic_fixture: int = 1
+    # 1.2 honesty. Off is the identity: no penalty, no σ clip, no floor,
+    # no capacity scale, no walk-forward kill, no roll/vanna split.
+    honesty: bool = True
+    honest_allocator: bool = True
+    sigma_clip_quantile: float = 0.75
+    min_weight_floor: float = 0.03
+    split_roll_vanna: bool = True
+    capacity_caps: bool = True
+    # Gross |Δinventory| across products. 0 disables that leg.
+    turnover_cap: float = 600.0
+    # Peak of |sum of targets| across products. 0 disables that leg.
+    inventory_cap: float = 30.0
+    walkforward_kill: bool = True
 
 
 @dataclass
@@ -146,6 +177,10 @@ class DeskRun:
     markdown: str = ""
     pre_gate_max_abs_rho: float = 0.0
     ortho_notes: list[str] = field(default_factory=list)
+    penalties: dict[str, float] = field(default_factory=dict)
+    capacity_scale: dict[str, float] = field(default_factory=dict)
+    product_kills: list[str] = field(default_factory=list)
+    sleeve_kills: list[str] = field(default_factory=list)
 
 
 def _clip(x: float, lo: float, hi: float) -> float:
@@ -384,6 +419,29 @@ def _simulate_names(cfg: DeskConfig) -> tuple[np.ndarray, np.ndarray, dict[str, 
             path.d_funding = residualize_keep_mean(path.d_funding, path.d_box)
             path.funding = _rebuild_from_innovations(path.d_funding)
 
+    # Roll owns the term/roll clock. Vanna owns spot–vol correlation.
+    # Gram–Schmidt on the innovations, same idea as the smile split.
+    # Off leaves the 1.1 draws unchanged.
+    if cfg.split_roll_vanna:
+        for path in names.values():
+            spot_vol = path.product_return * path.d_sigma
+            clock = np.asarray(path.roll, dtype=float).copy()
+            d_vanna_raw = np.asarray(path.d_vanna, dtype=float).copy()
+            path.d_roll = residualize_keep_mean(path.d_roll, spot_vol)
+            path.d_roll = residualize_keep_mean(path.d_roll, d_vanna_raw)
+            path.d_vanna = residualize_keep_mean(path.d_vanna, clock)
+            path.d_vanna = residualize_keep_mean(path.d_vanna, path.d_roll)
+            path.vanna = _rebuild_from_innovations(path.d_vanna)
+
+    if cfg.regime == "toxic_flow":
+        for path in names.values():
+            path.tox = np.clip(0.80 + 0.20 * path.tox, 0.0, 1.0)
+        fills = np.clip(fills + 0.55, 0.0, 1.0)
+    elif cfg.regime == "wide_spread":
+        fills = np.clip(fills + 0.35, 0.0, 1.0)
+    elif cfg.regime == "no_fill":
+        fills = np.ones_like(fills)
+
     # Dispersion is its own factor. A common vol shock cancels in an
     # index-minus-basket spread, so the sleeve does not trade that shock.
     disp = np.zeros(n)
@@ -512,7 +570,15 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
     fills_n = {s: 0 for s in sleeves}
     fees = {s: 0.0 for s in sleeves}
     prev = {(p, s): 0.0 for p in cfg.products for s in sleeves}
+    prev_quote = {(p, s): (0.0, 1.0) for p in cfg.products for s in sleeves}
+    turnover = {s: 0.0 for s in sleeves}
+    revisions = {s: 0 for s in sleeves}
+    inv_path = {s: np.zeros(n) for s in sleeves}
+    gamma_path = {s: np.zeros(n) for s in sleeves}
+    vega_path = {s: np.zeros(n) for s in sleeves}
     scale_path = np.zeros(n)
+    fee_rate = cfg.research_fee * (6.0 if cfg.regime == "wide_spread" else 1.0)
+    block_fills = cfg.regime == "no_fill"
     suspect = 0
     calendar_breaks = 0
     n_fits = 0
@@ -630,7 +696,7 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
                     lagged_rv=float(path.lagged_rv[t]),
                     d_vrp=float(path.d_vrp[t]),
                 )
-                quote = quote_or_target(sleeve_id, ctx, fee_rate=cfg.research_fee)
+                quote = quote_or_target(sleeve_id, ctx, fee_rate=fee_rate)
                 pending.append((pid, sleeve_id, quote))
                 step_delta += quote.delta
                 step_gamma += quote.gamma
@@ -647,6 +713,19 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
             "volga": step_volga * scale,
         }
         for pid, sleeve_id, quote in pending:
+            old_target, old_spread = prev_quote[(pid, sleeve_id)]
+            if abs(quote.target - old_target) > 1e-12 or abs(quote.spread_mult - old_spread) > 1e-12:
+                revisions[sleeve_id] += 1
+            prev_quote[(pid, sleeve_id)] = (quote.target, quote.spread_mult)
+            if block_fills:
+                # The quote is recorded. Nothing trades, so inventory and PnL stay at 0.
+                continue
+            inv = quote.target * scale
+            turnover[sleeve_id] += abs(inv - prev[(pid, sleeve_id)])
+            prev[(pid, sleeve_id)] = inv
+            inv_path[sleeve_id][t] += inv
+            gamma_path[sleeve_id][t] += quote.gamma * scale
+            vega_path[sleeve_id][t] += quote.vega * scale
             raw[sleeve_id][t] += quote.raw_pnl * scale
             by_product[sleeve_id][pid][t] += quote.raw_pnl * scale
             f_gamma[sleeve_id][t] += quote.f_gamma * scale
@@ -656,7 +735,6 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
             g_by_product[sleeve_id][pid][t] += quote.f_gamma * scale
             fills_n[sleeve_id] += int(quote.fill)
             fees[sleeve_id] += quote.fee * scale
-            prev[(pid, sleeve_id)] = quote.target * scale
 
     qv = np.zeros(n)
     for path in names.values():
@@ -684,6 +762,21 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
             fit = strip_residual(raw[sleeve_id], index_ret, f_gamma[sleeve_id], fv)
         residual[sleeve_id] = fit.residual
         fits[sleeve_id] = fit
+
+    # The pre-trade shocks are already separate. What still lines up is the
+    # alpha product (previous target times the innovation) on the commodity
+    # name. Remove the roll sleeve's residual from vanna, keep vanna's mean,
+    # then put vanna back in its own factor subspace.
+    if (
+        cfg.split_roll_vanna
+        and "vanna_tilt" in residual
+        and "roll_yield" in residual
+        and _enabled(cfg, "vanna_tilt")
+        and _enabled(cfg, "roll_yield")
+    ):
+        residual["vanna_tilt"] = residualize_keep_mean(residual["vanna_tilt"], residual["roll_yield"])
+        if float(np.std(residual["vanna_tilt"])) > 1e-12:
+            residual["vanna_tilt"] = strip_factors(residual["vanna_tilt"], _cols("vanna_tilt")).residual
 
     def _restrip(series: dict[str, np.ndarray], on: dict[str, bool]) -> dict[str, np.ndarray]:
         """Put each enabled residual back in its own factor-orthogonal subspace.
@@ -727,14 +820,66 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
 
     enabled_flags = [enabled_map[s] for s in sleeves]
     resid_for_alloc = [residual[s] if enabled_flags[i] else np.zeros(n) for i, s in enumerate(sleeves)]
+    penalties: dict[str, float] = {}
+    flags: dict[str, str] = {}
+    smooth_stats: dict[str, dict[str, float]] = {}
+    for sleeve_id in sleeves:
+        if cfg.honesty and enabled_map[sleeve_id]:
+            pen, flag, stats = smoothness_penalty(residual[sleeve_id], raw[sleeve_id])
+        else:
+            pen, flag, stats = 1.0, "ok", {
+                "ac1": 0.0,
+                "dc_share": 0.0,
+                "const_trend_r2": 0.0,
+                "low_freq_share": 0.0,
+            }
+        penalties[sleeve_id] = pen
+        flags[sleeve_id] = flag
+        smooth_stats[sleeve_id] = stats
+    clip_q = cfg.sigma_clip_quantile if cfg.honest_allocator else 0.0
     w = allocate(
         resid_for_alloc,
         enabled_flags,
         max_weight=cfg.max_sleeve_weight,
         corr_cap=cfg.corr_cap,
         sharpe_tilt=cfg.sharpe_tilt,
+        sigma_clip_quantile=clip_q,
     )
+    # Pre-penalty portfolio, for the raw Sharpe column. Not a capacity.
+    w_raw = np.asarray(w, dtype=float).copy()
+    if cfg.honesty or cfg.honest_allocator or cfg.capacity_caps or cfg.walkforward_kill:
+        if cfg.honesty:
+            for i, sleeve_id in enumerate(sleeves):
+                w[i] *= penalties[sleeve_id]
+            w = renorm_cap(w, cfg.max_sleeve_weight)
+        half = n // 2
+        eligible = []
+        kills = []
+        for i, sleeve_id in enumerate(sleeves):
+            series = residual[sleeve_id]
+            test = series[half:] if n - half >= 2 else series
+            test_mu = float(np.mean(test)) if test.size else 0.0
+            raw_std = float(np.std(series, ddof=1)) if series.size >= 2 else 0.0
+            mean_all = float(np.mean(series)) if series.size else 0.0
+            floor_on = (
+                cfg.honest_allocator
+                and enabled_flags[i]
+                and penalties[sleeve_id] > 0.0
+                and mean_all > 1e-8
+                and raw_std >= 1e-5
+                and not (cfg.walkforward_kill and test_mu <= 0.0)
+            )
+            eligible.append(floor_on)
+            if cfg.walkforward_kill and enabled_flags[i] and test_mu <= 0.0:
+                kills.append(sleeve_id)
+        if cfg.honest_allocator and cfg.min_weight_floor > 0.0:
+            w = apply_min_weight_floor(w, eligible, cfg.min_weight_floor, cfg.max_sleeve_weight)
+        for sleeve_id in kills:
+            w[sleeves.index(sleeve_id)] = 0.0
+    else:
+        kills = []
     weights = {s: float(w[i]) for i, s in enumerate(sleeves)}
+    raw_alloc_weights = {s: float(w_raw[i]) for i, s in enumerate(sleeves)}
 
     active = [s for s, flag in zip(sleeves, enabled_flags) if flag]
     pear = np.eye(len(active))
@@ -770,11 +915,53 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
                 rho = pearson(per_resid[a], per_resid[product_ids[j]])
                 product_mat[i, j] = product_mat[j, i] = rho
 
+    def _path_length(path: np.ndarray) -> float:
+        if path.size == 0:
+            return 0.0
+        total = abs(float(path[0]))
+        if path.size > 1:
+            total += float(np.sum(np.abs(np.diff(path))))
+        return total
+
+    capacity_scale: dict[str, float] = {}
+    for i, sleeve_id in enumerate(sleeves):
+        scale_i = 1.0
+        if cfg.capacity_caps:
+            if cfg.turnover_cap > 0.0 and turnover[sleeve_id] > cfg.turnover_cap:
+                scale_i = min(scale_i, cfg.turnover_cap / turnover[sleeve_id])
+            peak_i = float(np.max(np.abs(inv_path[sleeve_id]))) if n else 0.0
+            if cfg.inventory_cap > 0.0 and peak_i > cfg.inventory_cap:
+                scale_i = min(scale_i, cfg.inventory_cap / peak_i)
+        capacity_scale[sleeve_id] = scale_i
+        w[i] *= scale_i
+        weights[sleeve_id] = float(w[i])
+
     desk_raw = np.zeros(n)
     desk_res = np.zeros(n)
+    desk_res_raw_w = np.zeros(n)
+    desk_inv = np.zeros(n)
     for sleeve_id, weight in weights.items():
         desk_raw += weight * raw[sleeve_id]
         desk_res += weight * residual[sleeve_id]
+        desk_inv += weight * inv_path[sleeve_id]
+    for sleeve_id, weight in raw_alloc_weights.items():
+        desk_res_raw_w += weight * residual[sleeve_id]
+
+    half = n // 2
+    product_kills: list[str] = []
+    for pid in cfg.products:
+        test_pnl = 0.0
+        for sleeve_id in sleeves:
+            test_pnl += float(np.sum(by_product[sleeve_id][pid][half:]))
+        if cfg.walkforward_kill and test_pnl <= 0.0:
+            product_kills.append(pid)
+
+    gross_turnover = float(sum(turnover.values()))
+    peak_inv = float(np.max(np.abs(desk_inv))) if n else 0.0
+    pen_desk_pnl = float(np.sum(desk_res))
+    gamma_len = float(sum(_path_length(gamma_path[s]) for s in sleeves))
+    vega_len = float(sum(_path_length(vega_path[s]) for s in sleeves))
+    rev_per_step = float(sum(revisions.values()) / n) if n else 0.0
 
     worst, worst_label = _scenario(
         end_greeks["delta"],
@@ -789,6 +976,15 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
     for sleeve_id in sleeves:
         fit = fits[sleeve_id]
         series = residual[sleeve_id]
+        raw_sh = per_step_sharpe(series)
+        pen = penalties[sleeve_id]
+        stats = smooth_stats[sleeve_id]
+        peak_i = float(np.max(np.abs(inv_path[sleeve_id]))) if n else 0.0
+        avg_i = float(np.mean(np.abs(inv_path[sleeve_id]))) if n else 0.0
+        pen_pnl = float(np.sum(series)) * pen
+        to = turnover[sleeve_id]
+        test = series[half:] if n - half >= 2 else series
+        test_mu = float(np.mean(test)) if test.size else 0.0
         rows.append(
             SleeveRow(
                 sleeve_id=sleeve_id,
@@ -798,7 +994,7 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
                 raw_pnl=float(np.sum(raw[sleeve_id])),
                 residual_pnl=float(np.sum(series)),
                 mean_residual=float(np.mean(series)) if n else 0.0,
-                sharpe_residual=per_step_sharpe(series),
+                sharpe_residual=raw_sh,
                 r2=float(fit.r2),
                 beta=float(fit.beta),
                 gamma_coef=float(fit.gamma_coef),
@@ -810,6 +1006,25 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
                 max_dd_residual=cumulative_drawdown(series),
                 n_fills=fills_n[sleeve_id],
                 fees=fees[sleeve_id],
+                residual_sharpe_raw=raw_sh,
+                residual_sharpe_penalized=raw_sh * pen,
+                smoothness_flag=flags[sleeve_id],
+                smoothness_penalty=pen,
+                ac1=float(stats.get("ac1", 0.0)),
+                dc_share=float(stats.get("dc_share", 0.0)),
+                const_trend_r2=float(stats.get("const_trend_r2", 0.0)),
+                low_freq_share=float(stats.get("low_freq_share", 0.0)),
+                turnover=to,
+                avg_abs_inventory=avg_i,
+                max_abs_inventory=peak_i,
+                gamma_path_length=_path_length(gamma_path[sleeve_id]),
+                vega_path_length=_path_length(vega_path[sleeve_id]),
+                quote_revisions_per_step=(revisions[sleeve_id] / n) if n else 0.0,
+                residual_per_turnover=(pen_pnl / to) if to > 1e-12 else 0.0,
+                residual_per_peak_inventory=(pen_pnl / peak_i) if peak_i > 1e-12 else 0.0,
+                capacity_scale=capacity_scale[sleeve_id],
+                test_mean_residual=test_mu,
+                sleeve_kill=sleeve_id in kills,
             )
         )
         if fit.r2 < 0.15 and enabled_map[sleeve_id]:
@@ -835,6 +1050,46 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
     else:
         notes.append("Orthogonality gate did not residualize or merge a pair on this seed.")
     notes.append(research_pca(residual, active))
+    notes.append(
+        "Unstandardized PCA is noise-dominated when a few high-σ sleeves own the sum of squares. "
+        "Quote the standardized share. It is not a live risk model."
+    )
+    if cfg.honesty:
+        flat = [s for s, flag in flags.items() if flag == "flat"]
+        smooth = [s for s, flag in flags.items() if flag == "smooth"]
+        notes.append(
+            "Raw residual Sharpe is not a capacity. The smoothness penalty multiplies it. "
+            f"Flat (weight forced toward 0): {', '.join(flat) if flat else 'none'}. "
+            f"Smooth (penalty in (0, 1)): {', '.join(smooth) if smooth else 'none'}."
+        )
+    if cfg.honest_allocator:
+        notes.append(
+            f"Allocator clips σ at the {cfg.sigma_clip_quantile:.2f} quantile of the sleeve panel "
+            f"before inverse-vol, then lifts a positive-mean sleeve to a floor of {cfg.min_weight_floor:.2f} "
+            f"when the walk-forward test mean is still positive. Concentration cap {cfg.max_sleeve_weight:.2f}."
+        )
+    if cfg.split_roll_vanna:
+        notes.append(
+            "Roll innovations are residualized against spot–vol, and vanna innovations against the "
+            "term/roll clock. After the greek strip, vanna's residual is residualized against the roll "
+            "sleeve (mean kept) and stripped again. Gate thresholds stay 0.40 hard and 0.35 shrink."
+        )
+    if cfg.capacity_caps:
+        notes.append(
+            f"Capacity soft caps: gross turnover {cfg.turnover_cap:.1f}, peak |inventory| {cfg.inventory_cap:.1f}. "
+            "A sleeve over the cap has its weight scaled by cap/usage. Caps off is the identity. "
+            "Residual PnL per unit turnover and per unit peak inventory are the edge-density columns. Not annualized."
+        )
+    if kills:
+        notes.append(
+            "Walk-forward sleeve_kill (second-half residual mean ≤ 0): " + ", ".join(kills) + ". "
+            "Offline Jev `sleeve_kill` / `kill_sleeve` is a flag. It does not emit an order."
+        )
+    if product_kills:
+        notes.append(
+            "Walk-forward product_kill (second-half raw PnL ≤ 0): " + ", ".join(product_kills) + ". "
+            "The product stays in the synthetic book; the flag is the research control."
+        )
     if cfg.factorize_smile:
         notes.append(
             "Smile factors are split: slope, curvature, and far-wing innovations. "
@@ -858,6 +1113,31 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
             f"EQ_INDEX Dupire front local variance {dup_txt}. "
             f"Sticky-delta minus sticky-strike ATM gap after a 1% spot move: {gap_txt}."
         )
+    if cfg.walkforward_kill and (kills or product_kills):
+        state = build_mm_state(
+            time=float(n),
+            spot=100.0,
+            option_mid=1.0,
+            iv=0.2,
+            inventory=0,
+            delta=0.0,
+            gamma=0.0,
+            vega=0.0,
+            cash_pnl=0.0,
+            half_spread=0.2,
+            quoting_allowed=True,
+        )
+        state["desk"] = {
+            "enabled": 1.0,
+            "edge_fail": 1.0 if kills else 0.0,
+            "product_edge_fail": 1.0 if product_kills else 0.0,
+        }
+        ans = _CLIENT.system_one(state, build_desk_questions())
+        adj = apply_desk_policy(ans, state)
+        notes.append(
+            f"Offline Jev answered `{adj.reason}` (kill={adj.kill}, product_kill={adj.product_kill}). "
+            "Choice / Noul only. Jev does not emit an order."
+        )
     notes.append("Quotes are synthetic. synthetic_fixture=1. This is not an OPRA surface.")
     if worst_label != "flat":
         notes.append(f"End-of-path scenario grid worst PnL {worst:.4f} at {worst_label}.")
@@ -874,6 +1154,16 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
         desk_sharpe_residual=per_step_sharpe(desk_res),
         desk_max_dd_residual=cumulative_drawdown(desk_res),
         weight_sum=float(sum(weights.values())),
+        desk_sharpe_raw=per_step_sharpe(desk_res_raw_w),
+        desk_turnover=gross_turnover,
+        desk_peak_inventory=peak_inv,
+        desk_residual_per_turnover=(pen_desk_pnl / gross_turnover) if gross_turnover > 1e-12 else 0.0,
+        desk_residual_per_peak_inventory=(pen_desk_pnl / peak_inv) if peak_inv > 1e-12 else 0.0,
+        gamma_path_length=gamma_len,
+        vega_path_length=vega_len,
+        quote_revisions_per_step=rev_per_step,
+        product_kills=product_kills,
+        sleeve_kills=list(kills),
         synthetic_fixture=cfg.synthetic_fixture,
         corr_cap=cfg.corr_cap,
         pre_gate_max_abs_rho=pre_max,
@@ -902,6 +1192,10 @@ def run_desk(cfg: DeskConfig | None = None) -> DeskRun:
         markdown=md,
         pre_gate_max_abs_rho=pre_max,
         ortho_notes=ortho_notes,
+        penalties=penalties,
+        capacity_scale=capacity_scale,
+        product_kills=product_kills,
+        sleeve_kills=list(kills),
     )
 
 
@@ -976,8 +1270,22 @@ def multi_seed_corr(
         headline={
             "skew_residual/fly_butterfly": _head("skew_residual", "fly_butterfly"),
             "mm_spread/vrp_varswap": _head("mm_spread", "vrp_varswap"),
+            "roll_yield/vanna_tilt": _head("roll_yield", "vanna_tilt"),
         },
     )
+
+
+def _honesty_off() -> dict[str, object]:
+    """Flags that reprint a pre-1.2 book. Each one off is the identity."""
+    return {
+        "honesty": False,
+        "honest_allocator": False,
+        "split_roll_vanna": False,
+        "capacity_caps": False,
+        "walkforward_kill": False,
+        "sigma_clip_quantile": 0.0,
+        "min_weight_floor": 0.0,
+    }
 
 
 def legacy_config(**overrides: object) -> DeskConfig:
@@ -997,6 +1305,25 @@ def legacy_config(**overrides: object) -> DeskConfig:
         gate_threshold=0.50,
         regime="baseline",
         fit_surfaces=False,
+        **_honesty_off(),
+    )
+    for key, value in overrides.items():
+        setattr(cfg, key, value)
+    return cfg
+
+
+def legacy_ortho_config(**overrides: object) -> DeskConfig:
+    """1.1.0-zig-ortho snapshot.
+
+    Smile split, convexity split, six-factor strip, and the 0.40 / 0.35 gate
+    stay on. Honesty, the σ clip, the weight floor, capacity caps, the
+    walk-forward kill, and the roll/vanna split stay off, so seed-11
+    correlations reprint. Weights can still move if a later default inside
+    ``allocate`` changes; this snapshot passes ``sigma_clip_quantile=0``.
+    """
+    cfg = DeskConfig(
+        fit_surfaces=False,
+        **_honesty_off(),
     )
     for key, value in overrides.items():
         setattr(cfg, key, value)

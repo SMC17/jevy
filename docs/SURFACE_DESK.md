@@ -1,6 +1,6 @@
 # Surface desk
 
-**Version:** `1.1.0-zig-ortho`  
+**Version:** `1.2.0-zig-honest`  
 **Code:** `jev_omm/surface/book.py`, `jev_omm/desk/fixtures.py`, existing `jev_omm/surface/svi.py` / `zig/src/svi.zig`.  
 **Mode:** simulation / paper. The checked-in book is a synthetic fixture.
 

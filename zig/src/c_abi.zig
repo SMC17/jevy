@@ -1006,7 +1006,53 @@ export fn jev_omm_residual_strip_k(
     out_r2.* = fit.r2;
 }
 
+export fn jev_omm_smoothness(
+    n: usize,
+    resid: [*]const f64,
+    raw: [*]const f64,
+    out_ac1: *f64,
+    out_dc: *f64,
+    out_const_trend: *f64,
+    out_low_freq: *f64,
+    out_penalty: *f64,
+    out_flag: *i32,
+) callconv(.c) void {
+    const sm = desk.smoothnessPenalty(resid[0..n], raw[0..n]);
+    out_ac1.* = sm.ac1;
+    out_dc.* = sm.dc_share;
+    out_const_trend.* = sm.const_trend_r2;
+    out_low_freq.* = sm.low_freq_share;
+    out_penalty.* = sm.penalty;
+    out_flag.* = @intCast(sm.flag);
+}
+
+export fn jev_omm_allocate_inverse_vol(
+    n_sleeves: usize,
+    n_steps: usize,
+    resid_packed: [*]const f64,
+    enabled: [*]const u8,
+    max_weight: f64,
+    corr_cap: f64,
+    sharpe_tilt: f64,
+    sigma_clip_q: f64,
+    out_w: [*]f64,
+) callconv(.c) void {
+    const m = @min(n_sleeves, desk.MAX_SLEEVES);
+    var series: [desk.MAX_SLEEVES][]const f64 = undefined;
+    var on: [desk.MAX_SLEEVES]bool = .{false} ** desk.MAX_SLEEVES;
+    var i: usize = 0;
+    while (i < m) : (i += 1) {
+        const start = i * n_steps;
+        series[i] = resid_packed[start .. start + n_steps];
+        on[i] = enabled[i] != 0;
+    }
+    var w: [desk.MAX_SLEEVES]f64 = .{0} ** desk.MAX_SLEEVES;
+    desk.allocateInverseVolClipped(series[0..m], on[0..m], max_weight, corr_cap, sharpe_tilt, sigma_clip_q, w[0..m]);
+    i = 0;
+    while (i < m) : (i += 1) out_w[i] = w[i];
+}
+
 export fn jev_omm_version() callconv(.c) [*:0]const u8 {
-    return "1.1.0-zig-ortho";
+    return "1.2.0-zig-honest";
 }
 

@@ -248,6 +248,22 @@ On the fifteen-path grid (five seeds, three regimes, 80 steps) no residual pair 
 
 Extra offline questions: `merge_sleeve`, `cut_corr_pair`, `product_kill`. Identity when `desk.enabled` is off. They do not emit orders. The k-factor strip is `jev_omm_residual_strip_k`. The three-factor export is unchanged.
 
+## 6f. Honest desk (`1.2.0-zig-honest`)
+
+```
+greek strip
+        → smoothness penalty (flat leftover → weight 0)
+        → roll residual removed from vanna (mean kept), strip again
+        → inverse-vol with σ clipped at the panel's 75th percentile
+        → min weight 0.03 for a positive-mean sleeve that still has a test-half edge
+        → walk-forward sleeve_kill when the test-half mean is ≤ 0
+        → soft caps on gross turnover and peak |inventory|
+```
+
+`legacy_ortho_config()` reprints the 1.1 book (no penalty, no clip, no floor, no caps, no roll/vanna split). `legacy_config()` still reprints the 1.0 correlations. The raw per-step residual Sharpe is reported and then penalized. It is not annualized and it is not a capacity. See [DESK_HONESTY.md](./DESK_HONESTY.md) and [ablation_desk_honest.md](./ablation_desk_honest.md).
+
+Offline questions add `sleeve_kill`, answered when `desk.edge_fail` is set. `product_edge_fail` raises `product_kill`. Both are flags. Jev does not emit an order.
+
 ## 6c. Evidence pass (`0.8.0-zig-evidence`)
 
 No new warehouse or engine. The simulator's primary fill path is the existing LOB stepper; Poisson is `fill_model=poisson`. Finite-horizon A–S uses rolling `T − t`. Hedges update position, cash, slippage, and marked PnL. Optional risk limits (notional, per-strike, quotes outstanding) are no-ops until set. Checked-in synthetic ablation, numerical self-checks, and a Jev paper scoreboard are under `docs/`. They are not a live track record.
