@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from jev_omm.config import TRADING_SECONDS_PER_YEAR, QuoterConfig
+from jev_omm.execution.executable import kappa_for_touch, queue_decision
 from jev_omm.quoter.avellaneda_stoikov import make_quote
 from jev_omm.quoter.gueant_ode import IntensityFit, IntensityObs, estimate_intensity
 from jev_omm.research.features import pack_adjustment
@@ -42,6 +43,9 @@ class ReplayRow:
     mean_half: float
     quote_uptime: float
     n_quoted: int
+    join_rate: float = 0.0
+    adverse_markout: float = 0.0
+    kappa_quote: float = 0.0
 
 
 def _finite(x: float) -> bool:
@@ -159,6 +163,317 @@ def fit_hazard(tape: Tape, *, kappa_prior: float, end: int) -> dict[str, object]
     }
 
 
+def _train_touch(tape: Tape, end: int) -> float:
+    """Median two-sided half-spread on the train window. Price units, not ticks."""
+    arr = _arrays(tape)
+    labels = tape.book_state or ["two_sided"] * len(tape)
+    halves: list[float] = []
+    last = min(end, len(tape))
+    for i in range(last):
+        if labels[i] != "two_sided":
+            continue
+        bid, ask = float(arr["bid"][i]), float(arr["ask"][i])
+        if _finite(bid) and _finite(ask) and ask > bid:
+            halves.append(0.5 * (ask - bid))
+    if not halves:
+        return 0.05
+    return float(np.median(np.asarray(halves, dtype=float)))
+
+
+def _train_print_rate(tape: Tape, end: int) -> float:
+    """Contracts per second of the next-row print, train window only."""
+    arr = _arrays(tape)
+    labels = tape.book_state or ["two_sided"] * len(tape)
+    contracts = 0.0
+    seconds = 0.0
+    last = min(end, len(tape) - 1)
+    for i in range(max(last, 0)):
+        if labels[i] != "two_sided":
+            continue
+        dt = float(tape.time_seconds[i + 1] - tape.time_seconds[i])
+        if dt <= 0.0:
+            dt = 60.0
+        tsz = float(arr["tsz"][i + 1])
+        contracts += tsz if _finite(tsz) and tsz > 0.0 else 1.0
+        seconds += dt
+    if seconds <= 0.0:
+        return 2.0 / 60.0
+    return float(contracts / seconds)
+
+
+def _post_side(
+    *,
+    model_px: float,
+    touch_px: float,
+    inside: float,
+    depth: float,
+    toxic: float,
+    queue_edge: bool,
+    our_size: int,
+    dt: float,
+    spread_capture: float,
+    print_rate: float,
+) -> tuple[float | None, float, str]:
+    """Post one side. ``inside`` > 0 means the model is through the touch.
+
+    A model that is already inside the spread is posted there (ahead 0).
+    A model at the touch joins, and ``queue_edge`` may step one tick inside
+    or cancel. A model behind the touch stays behind. It does not improve
+    up to the touch. A returned price of None is a pull.
+    """
+    if inside > _TICK:
+        ahead0 = 0.0
+        at_touch = False
+        already_inside = True
+    elif inside >= -_TICK:
+        ahead0 = max(depth, 0.0)
+        at_touch = True
+        already_inside = False
+    else:
+        return model_px, 0.0, "behind"
+    dec = queue_decision(
+        ahead0,
+        float(max(our_size, 1)),
+        print_rate,
+        0.0,
+        dt,
+        spread_capture,
+        0.0,
+        toxic if queue_edge else 0.0,
+        queue_edge,
+    )
+    if dec.action == 2:
+        return None, ahead0, "cancel"
+    if dec.action == 1 and at_touch and not already_inside:
+        stepped = touch_px + _TICK if model_px <= touch_px + _TICK else model_px
+        # Bid steps up; ask steps down. ``inside``'s sign is handled by the caller
+        # via ``touch_px`` and the direction encoded in ``step_sign`` — see below.
+        return stepped, 0.0, "improve"
+    if already_inside:
+        return model_px, 0.0, "inside"
+    return touch_px, ahead0, "join"
+
+
+def _replay_lob(
+    tape: Tape,
+    *,
+    label: str,
+    mode: str,
+    pack: str,
+    fees: TapeFeeSchedule,
+    kappa: float,
+    sigma: float,
+    start: int,
+    end: int,
+    touch: float,
+    print_rate: float,
+    executable_units: bool,
+    queue_edge: bool,
+    spreads_in_touch: float,
+) -> ReplayRow:
+    """LOB posting on a local tape.
+
+    The fill is still the next row's print. Joining a displayed size the
+    print does not clear fills nothing. A quote inside the spread has no
+    queue ahead of it, so a print at the old touch reaches it. Sitting
+    behind fills only when the print trades through that price. No print
+    is invented. Missing spot does not become the strike.
+    """
+    arr = _arrays(tape)
+    labels = tape.book_state or ["two_sided"] * len(tape)
+    gamma = 0.12
+    quote_kappa = float(kappa)
+    if executable_units and mode not in ("fixed", "join_touch"):
+        quote_kappa = kappa_for_touch(gamma, max(touch, 1e-6) * spreads_in_touch, kappa)
+    cfg = _quoter(mode, kappa=quote_kappa, sigma=sigma)
+    inv = 0
+    cash = 0.0
+    fills = 0
+    contracts = 0.0
+    fee_paid = 0.0
+    rebate_paid = 0.0
+    markout = 0.0
+    halves: list[float] = []
+    quoted = 0
+    eligible = 0
+    joins = 0
+    prev_mid: float | None = None
+    spot_known = bool(np.isfinite(arr["spot"]).any())
+    bsz = arr["bid"] * 0.0
+    asz = arr["bid"] * 0.0
+    if tape.bid_sz is not None:
+        bsz = tape.bid_sz
+    if tape.ask_sz is not None:
+        asz = tape.ask_sz
+    for i in range(start, end - 1):
+        state = labels[i]
+        bid, ask = float(arr["bid"][i]), float(arr["ask"][i])
+        if state != "two_sided" or not (_finite(bid) and _finite(ask) and ask > bid):
+            continue
+        eligible += 1
+        mid = _mid(bid, ask)
+        ret_bps = 0.0
+        if prev_mid is not None and prev_mid > 0.0:
+            ret_bps = 1e4 * (mid - prev_mid) / prev_mid
+        move = 0.0 if prev_mid is None else abs(mid - prev_mid)
+        toxic = min(1.0, move / max(touch, 1e-6))
+        prev_mid = mid
+        dt = float(tape.time_seconds[i + 1] - tape.time_seconds[i])
+        if dt <= 0.0:
+            dt = 60.0
+        strike = float(arr["strike"][i]) if _finite(float(arr["strike"][i])) else 100.0
+        spot_i = float(arr["spot"][i])
+        spot_ok = _finite(spot_i)
+        depth_b = float(bsz[i]) if _finite(float(bsz[i])) else 0.0
+        depth_a = float(asz[i]) if _finite(float(asz[i])) else 0.0
+        if mode == "join_touch":
+            post_bid: float | None = bid
+            post_ask: float | None = ask
+            half = 0.5 * (ask - bid)
+            size = 1
+            bid_ahead = max(depth_b, 0.0)
+            ask_ahead = max(depth_a, 0.0)
+            bid_how, ask_how = "join", "join"
+            bid_live = True
+            ask_live = True
+        else:
+            adj = pack_adjustment(
+                pack,
+                ret_bps=ret_bps,
+                spot=spot_i if spot_ok else 0.0,
+                strike=strike,
+                mid=mid,
+                allow_gex=spot_known and spot_ok,
+            )
+            spread_mult = 1.0 if adj is None else adj.spread_mult
+            size_mult = 1.0 if adj is None else adj.size_mult
+            if adj is not None and adj.size_mult == 0.0:
+                continue
+            quote = make_quote(mid, inv, cfg, spread_mult=spread_mult, size_mult=size_mult)
+            model_bid = min(quote.bid, ask - _TICK)
+            model_ask = max(quote.ask, bid + _TICK)
+            if model_ask <= model_bid + _TICK:
+                continue
+            size = max(quote.bid_size, 1)
+            capture = max(0.0, mid - model_bid)
+            post_bid, bid_ahead, bid_how = _post_side(
+                model_px=model_bid,
+                touch_px=bid,
+                inside=model_bid - bid,
+                depth=depth_b,
+                toxic=toxic,
+                queue_edge=queue_edge,
+                our_size=size,
+                dt=dt,
+                spread_capture=capture,
+                print_rate=print_rate,
+            )
+            if bid_how == "improve":
+                post_bid = min(bid + _TICK, ask - _TICK)
+                bid_ahead = 0.0
+            capture_a = max(0.0, model_ask - mid)
+            post_ask, ask_ahead, ask_how = _post_side(
+                model_px=model_ask,
+                touch_px=ask,
+                inside=ask - model_ask,
+                depth=depth_a,
+                toxic=toxic,
+                queue_edge=queue_edge,
+                our_size=size,
+                dt=dt,
+                spread_capture=capture_a,
+                print_rate=print_rate,
+            )
+            if ask_how == "improve":
+                post_ask = max(ask - _TICK, bid + _TICK)
+                ask_ahead = 0.0
+            bid_live = post_bid is not None
+            ask_live = post_ask is not None
+            if not bid_live and not ask_live:
+                continue
+            if not bid_live:
+                post_bid = mid
+                bid_ahead = 0.0
+                bid_how = "cancel"
+            if not ask_live:
+                post_ask = mid
+                ask_ahead = 0.0
+                ask_how = "cancel"
+            if bid_live and ask_live and post_ask <= post_bid + _TICK:
+                continue
+            if bid_live and ask_live:
+                half = 0.5 * (float(post_ask) - float(post_bid))
+            elif bid_live:
+                half = max(0.0, mid - float(post_bid))
+            else:
+                half = max(0.0, float(post_ask) - mid)
+        halves.append(half)
+        quoted += 1
+        if bid_how in ("join", "inside", "improve") or ask_how in ("join", "inside", "improve"):
+            joins += 1
+        trade = float(arr["trade"][i + 1])
+        if not _finite(trade):
+            continue
+        tsz = float(arr["tsz"][i + 1])
+        lot = tsz if _finite(tsz) and tsz > 0.0 else 1.0
+        side = 0
+        px = 0.0
+        take = 0
+        if bid_live and trade <= float(post_bid) + 1e-9 and inv < 6:
+            reachable = lot - bid_ahead
+            if reachable >= 1.0 or (bid_ahead <= 0.0 and lot > 0.0):
+                take = min(size, max(1, int(lot))) if bid_ahead <= 0.0 else min(size, int(reachable))
+                if take > 0:
+                    side = 1
+                    px = float(post_bid)
+        elif ask_live and trade >= float(post_ask) - 1e-9 and inv > -6:
+            reachable = lot - ask_ahead
+            if reachable >= 1.0 or (ask_ahead <= 0.0 and lot > 0.0):
+                take = min(size, max(1, int(lot))) if ask_ahead <= 0.0 else min(size, int(reachable))
+                if take > 0:
+                    side = -1
+                    px = float(post_ask)
+        if side == 0 or take <= 0:
+            continue
+        cash -= side * px * take
+        fee_paid += fees.fee_per_contract * take
+        rebate_paid += fees.rebate_per_contract * take
+        cash -= fees.net_per_contract * take
+        inv += side * take
+        fills += 1
+        contracts += take
+        nxt = i + 2
+        if nxt < len(tape) and labels[nxt] == "two_sided":
+            nb, na = float(arr["bid"][nxt]), float(arr["ask"][nxt])
+            if _finite(nb) and _finite(na) and na > nb:
+                step_mo = side * take * (_mid(nb, na) - mid)
+                markout += step_mo
+    last_mid = prev_mid if prev_mid is not None else 0.0
+    for j in range(end - 1, start - 1, -1):
+        b, a = float(arr["bid"][j]), float(arr["ask"][j])
+        if _finite(b) and _finite(a) and a > b:
+            last_mid = _mid(b, a)
+            break
+    pnl = cash + inv * last_mid
+    return ReplayRow(
+        label=label,
+        quoter_mode=mode,
+        feature_pack=pack,
+        pnl=float(pnl),
+        n_fills=float(fills),
+        contracts=float(contracts),
+        fees=float(fee_paid),
+        rebates=float(rebate_paid),
+        markout_1=float(markout),
+        mean_half=float(sum(halves) / len(halves)) if halves else 0.0,
+        quote_uptime=float(quoted / max(eligible, 1)),
+        n_quoted=quoted,
+        join_rate=float(joins / quoted) if quoted else 0.0,
+        adverse_markout=float(markout),
+        kappa_quote=float(quote_kappa),
+    )
+
+
 def replay(
     tape: Tape,
     *,
@@ -170,8 +485,40 @@ def replay(
     sigma: float,
     start: int = 0,
     end: int | None = None,
+    fill_model: str = "print",
+    touch: float = 0.05,
+    print_rate: float = 2.0 / 60.0,
+    executable_units: bool = False,
+    queue_edge: bool = False,
+    spreads_in_touch: float = 1.0,
 ) -> ReplayRow:
-    """Replay one quoter on ``tape[start:end]``. Inventory is marked to the last mid."""
+    """Replay one quoter on ``tape[start:end]``. Inventory is marked to the last mid.
+
+    ``fill_model="print"`` is the 0.9 rule: join when tighter, sit behind
+    when wider, fill if the next print trades through, no queue ahead.
+    ``fill_model="lob"`` keeps the print as the fill but charges displayed
+    size against a joiner and posts an inside quote when the model is tighter.
+    """
+    stop = len(tape) if end is None else min(end, len(tape))
+    if fill_model == "lob":
+        return _replay_lob(
+            tape,
+            label=label,
+            mode=mode,
+            pack=pack,
+            fees=fees,
+            kappa=kappa,
+            sigma=sigma,
+            start=start,
+            end=stop,
+            touch=touch,
+            print_rate=print_rate,
+            executable_units=executable_units,
+            queue_edge=queue_edge,
+            spreads_in_touch=spreads_in_touch,
+        )
+    if fill_model != "print":
+        raise ValueError(f"fill_model must be 'print' or 'lob', got {fill_model!r}")
     arr = _arrays(tape)
     labels = tape.book_state or ["two_sided"] * len(tape)
     stop = len(tape) if end is None else min(end, len(tape))
@@ -285,8 +632,19 @@ def walk_forward(
     fees: TapeFeeSchedule | None = None,
     train_frac: float = 0.5,
     kappa_prior: float = 1.5,
+    fill_model: str = "lob",
+    executable_units: bool = True,
+    queue_edge: bool = True,
+    spreads_in_touch: float = 1.0,
 ) -> dict[str, object]:
-    """Fit the touch hazard on the first fraction; score models on the rest."""
+    """Fit the touch hazard on the first fraction; score models on the rest.
+
+    The default fill model is ``lob``: displayed size is charged against a
+    joiner, and an executable-unit κ puts the classical half-spread on the
+    train-window touch. ``fill_model="print"`` is the 0.9 rule (no queue,
+    κ held at the prior unless the hazard identifies it) and still shows
+    zero model fills on the checked-in fixture.
+    """
     fees = fees or TapeFeeSchedule(fee_per_contract=0.05, rebate_per_contract=0.0)
     n = len(tape)
     if n < 4:
@@ -314,22 +672,28 @@ def walk_forward(
     sigma_model = 0.45
     hazard = fit_hazard(tape, kappa_prior=kappa_prior, end=cut)
     kappa = float(hazard["k_per_price"]) if hazard["identified"] else kappa_prior
+    touch = _train_touch(tape, cut)
+    print_rate = _train_print_rate(tape, cut)
+    use_units = bool(executable_units) and fill_model == "lob"
+    use_queue = bool(queue_edge) and fill_model == "lob"
+    kappa_exec = kappa_for_touch(0.12, max(touch, 1e-6) * spreads_in_touch, kappa_prior)
     rows: list[ReplayRow] = []
     specs = list(ablation_specs()) + [("join_touch", "join_touch", "off")]
+    replay_kw = dict(
+        fees=fees,
+        kappa=kappa,
+        sigma=sigma_model,
+        start=cut,
+        end=n,
+        fill_model=fill_model,
+        touch=touch,
+        print_rate=print_rate,
+        executable_units=use_units,
+        queue_edge=use_queue,
+        spreads_in_touch=spreads_in_touch,
+    )
     for label, mode, pack in specs:
-        rows.append(
-            replay(
-                tape,
-                label=label,
-                mode=mode,
-                pack=pack,
-                fees=fees,
-                kappa=kappa,
-                sigma=sigma_model,
-                start=cut,
-                end=n,
-            )
-        )
+        rows.append(replay(tape, label=label, mode=mode, pack=pack, **replay_kw))
     uncal = replay(
         tape,
         label="as_uncalibrated_kappa",
@@ -340,6 +704,12 @@ def walk_forward(
         sigma=sigma_model,
         start=cut,
         end=n,
+        fill_model=fill_model,
+        touch=touch,
+        print_rate=print_rate,
+        executable_units=use_units,
+        queue_edge=use_queue,
+        spreads_in_touch=spreads_in_touch,
     )
     counts = count_states(tape)
     return {
@@ -352,8 +722,17 @@ def walk_forward(
         "sigma_how": sigma_how,
         "sigma_model": sigma_model,
         "spot_known": bool(np.isfinite(arr["spot"]).any()),
+        "spot_provenance": "underlying_print" if bool(np.isfinite(arr["spot"]).any()) else "absent",
+        "quote_mid_provenance": "cbbo",
         "hazard": hazard,
         "kappa_used": kappa,
+        "fill_model": fill_model,
+        "executable_units": use_units,
+        "queue_edge": use_queue,
+        "train_touch": touch,
+        "print_rate_per_second": print_rate,
+        "kappa_executable": kappa_exec,
+        "spreads_in_touch": spreads_in_touch,
         "fees": fees,
         "counts": counts,
         "rows": rows,
@@ -513,13 +892,96 @@ def render_walk_section(result: dict[str, object], *, title: str) -> str:
             "reason. State can still pull quotes; a low `quote_uptime` on "
             "`as_flow_gex_state` is the gate, not a GEX effect.\n\n"
         )
-    text += (
-        "With γ = 0.12 and κ = 1.5 the dominant half-spread term is "
-        "(1/γ) ln(1 + γ/κ) ≈ 0.64 dollars, before the market join/behind clip. "
-        "A preview NBBO of one to a few cents does not trade against that quote. "
-        "Fixed-spread is clamped at 0.25 and can catch a sweep the wider quotes miss. "
-        "That is the formula at these knobs, not a claim that 0.25 is optimal.\n\n"
-    )
+    if result.get("fill_model") == "lob" and result.get("executable_units"):
+        text += (
+            f"Fill model `lob`. Train touch {float(result.get('train_touch', 0.0)):.4f}. "
+            f"Executable κ {float(result.get('kappa_executable', 0.0)):.4f} sets the "
+            "A–S intensity half-spread equal to that touch "
+            f"(`spreads_in_touch` {float(result.get('spreads_in_touch', 1.0)):.2f}). "
+            "A joiner is behind displayed size; a quote inside the spread is not. "
+            "The next print is the only fill. No print was invented. "
+            f"Quote mid provenance `{result.get('quote_mid_provenance')}`. "
+            f"Spot provenance `{result.get('spot_provenance')}`.\n\n"
+        )
+    else:
+        text += (
+            "With γ = 0.12 and κ = 1.5 the dominant half-spread term is "
+            "(1/γ) ln(1 + γ/κ) ≈ 0.64 dollars, before the market join/behind clip. "
+            "A preview NBBO of one to a few cents does not trade against that quote. "
+            "Fixed-spread is clamped at 0.25 and can catch a sweep the wider quotes miss. "
+            "That is the formula at these knobs, not a claim that 0.25 is optimal.\n\n"
+        )
     if result["notes"]:
         text += f"{result['notes']}\n\n"
+    return text
+
+
+def _fill_table(rows: list[ReplayRow]) -> str:
+    cols = (
+        "label",
+        "pnl",
+        "n_fills",
+        "contracts",
+        "fees",
+        "markout_1",
+        "mean_half",
+        "join_rate",
+        "quote_uptime",
+    )
+    head = "| " + " | ".join(cols) + " |\n"
+    sep = "| " + " | ".join("---" for _ in cols) + " |\n"
+    body = ""
+    for row in rows:
+        cells = [
+            row.label,
+            _fmt(row.pnl),
+            _fmt(row.n_fills),
+            _fmt(row.contracts),
+            _fmt(row.fees),
+            _fmt(row.markout_1),
+            _fmt(row.mean_half),
+            _fmt(row.join_rate),
+            _fmt(row.quote_uptime),
+        ]
+        body += "| " + " | ".join(cells) + " |\n"
+    return head + sep + body
+
+
+def render_fill_comparison(tape: Tape, *, title: str) -> str:
+    """Print-rule table beside the executable LOB table. Same tape, no new prints."""
+    legacy = walk_forward(tape, fill_model="print", executable_units=False, queue_edge=False)
+    live = walk_forward(tape)
+    spot = live["spot_provenance"]
+    text = (
+        f"## {title}\n\n"
+        f"- Source: `{live['source']}`\n"
+        f"- Synthetic fixture: {'yes' if live['synthetic_fixture'] else 'no'}\n"
+        f"- Rows: {live['n']} (train ends at {live['train_end']}, test rows {live['test_rows']})\n"
+        f"- Spot provenance: `{spot}`. Quote mid provenance: `{live['quote_mid_provenance']}`.\n"
+        f"- Train touch: {float(live['train_touch']):.4f} price units. "
+        f"Print rate: {float(live['print_rate_per_second']):.6f} contracts/second.\n"
+        f"- Executable κ: {float(live['kappa_executable']):.4f} "
+        f"(A–S half-spread equals `spreads_in_touch` × train touch). "
+        f"Hazard κ stays {float(live['kappa_used']):.4f} and is not the quote κ.\n\n"
+        "### Legacy print rule (`fill_model=print`)\n\n"
+        "Join when the model is tighter, sit behind when it is wider, no queue. "
+        "This is the 0.9 / 1.2 table. Model half-spreads near 0.64 do not trade. "
+        "The print rule does not record a join rate.\n\n"
+        + _table(legacy["rows"])  # type: ignore[arg-type]
+        + "\n### Executable LOB (`fill_model=lob`, touch units, queue edge on)\n\n"
+        "The classical half-spread is mapped onto the train touch. A quote inside "
+        "the spread has no queue ahead. A joiner sits behind displayed size, and a "
+        "2-lot print does not clear it. Fixed-spread stays clamped at 0.25 and only "
+        "fills on a sweep. `join_touch` is the touch reference and does not improve.\n\n"
+        + _fill_table(live["rows"])  # type: ignore[arg-type]
+        + "\n"
+        + _verdict(live["rows"], live["uncalibrated"])  # type: ignore[arg-type]
+        + "\n\n"
+    )
+    if spot != "underlying_print":
+        text += (
+            "Spot is absent. The quoter's reference mid is the CBBO mid "
+            "(`quote_mid_provenance=cbbo`). No underlying print was joined in, "
+            "and the strike was not written down as a spot.\n\n"
+        )
     return text
