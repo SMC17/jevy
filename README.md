@@ -1,5 +1,7 @@
 # jevy
 
+**[Status](STATUS.md) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [Issues](https://github.com/SMC17/jevy/issues) · [All SMC17 work](https://github.com/users/SMC17/projects/16)**
+
 [![ci](https://github.com/SMC17/jevy/actions/workflows/ci.yml/badge.svg)](https://github.com/SMC17/jevy/actions/workflows/ci.yml)
 
 Research-oriented **options market-making laboratory** for Sean Collins ([SMC17/jevy](https://github.com/SMC17/jevy)).
