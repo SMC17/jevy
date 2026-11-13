@@ -31,7 +31,15 @@ TCBBO_COUNTS = {
 def render_real_or_fixture_markdown() -> str:
     fixture = load_local(FIXTURE)
     # Same research fee as the frozen OPRA block so the two tables compare.
-    walked = walk_forward(fixture, fees=TapeFeeSchedule(fee_per_contract=0.05, rebate_per_contract=0.0))
+    # The checked-in 0.9 table is the print rule. The LOB scoreboard is
+    # docs/ablation_fills.md. Do not point this renderer at fill_model=lob.
+    walked = walk_forward(
+        fixture,
+        fees=TapeFeeSchedule(fee_per_contract=0.05, rebate_per_contract=0.0),
+        fill_model="print",
+        executable_units=False,
+        queue_edge=False,
+    )
     counts = TCBBO_COUNTS
     intro = (
         "# Tape walk-forward (public preview and synthetic fixture)\n\n"

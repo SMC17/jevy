@@ -1,6 +1,6 @@
 # Orthogonality
 
-**Version:** `1.1.0-zig-ortho`, kept as the record of that pass. The current desk is `1.2.0-zig-honest`. See [DESK_HONESTY.md](./DESK_HONESTY.md).  
+**Version:** `1.1.0-zig-ortho`, kept as the record of that pass. The honesty layer is `1.2.0-zig-honest`. The paper desk is `1.3.0-zig-fills`. See [DESK_HONESTY.md](./DESK_HONESTY.md) and [EXECUTABLE_FILLS.md](./EXECUTABLE_FILLS.md).  
 **Code:** `jev_omm/desk/orthogonal.py`, `jev_omm/desk/harness.py`, `jev_omm/desk/sleeves.py`.  
 **Mode:** paper. Every path below is `synthetic_fixture=1`. No live tape, no order.
 

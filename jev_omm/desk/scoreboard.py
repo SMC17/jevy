@@ -64,6 +64,10 @@ class SleeveRow:
     capacity_scale: float = 1.0
     test_mean_residual: float = 0.0
     sleeve_kill: bool = False
+    lob_fills: float = 0.0
+    join_rate: float = 0.0
+    adverse_markout: float = 0.0
+    fill_pnl: float = 0.0
 
 
 @dataclass
@@ -99,6 +103,10 @@ class DeskScoreboard:
     quote_revisions_per_step: float = 0.0
     product_kills: list[str] = field(default_factory=list)
     sleeve_kills: list[str] = field(default_factory=list)
+    desk_fill_pnl: float = 0.0
+    desk_lob_fills: float = 0.0
+    desk_adverse_markout: float = 0.0
+    desk_join_rate: float = 0.0
 
     def as_dict(self) -> dict:
         return {
@@ -182,6 +190,29 @@ def to_markdown(board: DeskScoreboard, *, title: str) -> str:
                 pt=_fmt(row.residual_per_turnover),
                 pp=_fmt(row.residual_per_peak_inventory),
                 sc=_fmt(row.capacity_scale),
+            )
+        )
+    lines.append("")
+    lines.append(
+        f"Fill evidence (LOB, not the residual stream): lob fills {_fmt(board.desk_lob_fills)}, "
+        f"join rate {_fmt(board.desk_join_rate)}, adverse markout {_fmt(board.desk_adverse_markout)}, "
+        f"weighted fill PnL {_fmt(board.desk_fill_pnl)}. "
+        "Fill PnL is spread capture minus the toxic jump minus the research fee on a 60-second horizon. "
+        "It is not added to residual Sharpe and it is not annualized."
+    )
+    lines.append("")
+    lines.append("| sleeve | lob fills | join rate | adverse markout | fill pnl | residual pnl | turnover |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+    for row in board.rows:
+        lines.append(
+            "| {id} | {nf} | {jr} | {mo} | {fp} | {res} | {to} |".format(
+                id=row.sleeve_id,
+                nf=_fmt(row.lob_fills),
+                jr=_fmt(row.join_rate),
+                mo=_fmt(row.adverse_markout),
+                fp=_fmt(row.fill_pnl),
+                res=_fmt(row.residual_pnl),
+                to=_fmt(row.turnover),
             )
         )
     lines.append("")
