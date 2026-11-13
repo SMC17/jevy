@@ -8,7 +8,7 @@ jobs:
   zig-python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Zig 0.16.0
         run: |
