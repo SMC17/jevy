@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import re
 from pathlib import Path
 
 from jev_omm.research.numerical import (
@@ -43,7 +45,25 @@ def test_rk4_and_spectral_are_finite():
         assert abs(row["spectral_delta_b"]) < 50.0
 
 
+def _tokens(text: str) -> list[str]:
+    return re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?|[^\s\d.+-]+|[.+-]", text)
+
+
 def test_numerical_markdown_matches_checked_in_doc():
+    """The checked-in doc matches a fresh render.
+
+    Text must match exactly. Numbers must match to 1e-6 relative or 1e-8
+    absolute: finite-difference errors near 1e-10 differ between platform
+    math libraries (macOS vs Linux) and are noise, not a regression.
+    """
     path = Path("docs/NUMERICAL.md")
     assert path.is_file()
-    assert path.read_text() == render_numerical_markdown()
+    want, got = _tokens(path.read_text()), _tokens(render_numerical_markdown())
+    assert len(want) == len(got)
+    for a, b in zip(want, got):
+        try:
+            x, y = float(a), float(b)
+        except ValueError:
+            assert a == b
+            continue
+        assert math.isclose(x, y, rel_tol=1e-6, abs_tol=1e-8), (a, b)
