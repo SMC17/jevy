@@ -20,7 +20,7 @@ European Black–Scholes–Merton analytic price + delta/gamma/vega/theta.
 
 **Real today**, including vanna (\(\partial^2V/\partial S\partial\sigma\)) and volga (\(\partial^2V/\partial\sigma^2\)). **Upgrade:** American (tree/PDE), local vol, Heston, dividend schedules, discrete cash dividends; rho greek export.
 
-## `desk/` (`1.2.0-zig-honest`)
+## `desk/` (`1.3.0-zig-fills`, honesty from `1.2.0-zig-honest`)
 
 Paper multi-product book. `SurfaceBook` in `surface/book.py` fits raw SVI per underlier and expiry, runs the existing butterfly and calendar gates, and damps a calendar break instead of quoting through it. It also reports a front Dupire local variance and a sticky-delta minus sticky-strike gap. Twenty sleeves in `desk/sleeves.py` each expose a target, a risk budget, greeks, and a PnL stream. The first eight are the 1.0 names. `enabled=False` is a zero target. Flow, COT, the autocall warehouse, and the instability gate stay at the identity when `gates_on` is false.
 
@@ -110,7 +110,7 @@ Precomputed, paper-only features. Zig consumes scalars; it does not fetch.
 
 ## `execution/`
 
-Poisson fills (`fills.py`) with intensity decaying in distance-from-mid, plus a synthetic queue model (`lob.py` / `lob.zig`): depth, queue position, cancel latency, partial fills, adverse-selection markout, sequenced LobAdd / LobExecute / LobCancel.
+Poisson fills (`fills.py`) with intensity decaying in distance-from-mid, plus a synthetic queue model (`lob.py` / `lob.zig`): depth, queue position, cancel latency, partial fills, adverse-selection markout, sequenced LobAdd / LobExecute / LobCancel. `executable.py` maps the A–S half-spread onto a touch (`kappa_for_touch`) and decides stay / improve / cancel (`queue_decision`). Both match Zig. `queue_edge=False` is the identity stay.
 
 `queue_value` / `depth_ahead` score a resting order and the size in front of it on a small multi-level book.
 
